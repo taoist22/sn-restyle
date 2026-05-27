@@ -1,3 +1,7 @@
+
+
+https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
+
 # Restyle for Supernote
 
 **Restyle** is a plugin for the Supernote Nomad and Manta that lets you change the ink color and stroke thickness of handwriting and geometry shapes you have already written. Lasso any strokes or shapes on the page, tap the Restyle button, pick a color and thickness, and apply — the selected elements are updated in place with no repositioning.
