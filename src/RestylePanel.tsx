@@ -7,14 +7,18 @@ import {
   PEN_COLOR_LABELS,
   type LassoInfo,
   type PenColor,
+  type Preset,
   type RestyleOptions,
 } from './types';
 
 interface Props {
-  info: LassoInfo;
-  onApply: (options: RestyleOptions) => void;
-  onCancel: () => void;
-  busy: boolean;
+  info:           LassoInfo;
+  presets:        (Preset | null)[];
+  onApply:        (options: RestyleOptions) => void;
+  onSavePreset:   (index: number, color: PenColor, thickness: number) => void;
+  onClearPreset:  (index: number) => void;
+  onCancel:       () => void;
+  busy:           boolean;
 }
 
 const COLORS: PenColor[] = ['black', 'darkGray', 'lightGray', 'ghost'];
@@ -26,16 +30,19 @@ const COLOR_SWATCH: Record<PenColor, string> = {
   ghost:     '#FFFFFF',
 };
 
-export default function RestylePanel({info, onApply, onCancel, busy}: Props) {
-  const [selectedColor, setSelectedColor] = useState<PenColor | null>(null);
-  const [thicknessText, setThicknessText] = useState(
+export default function RestylePanel({
+  info, presets, onApply, onSavePreset, onClearPreset, onCancel, busy,
+}: Props) {
+  const [selectedColor, setSelectedColor]       = useState<PenColor | null>(null);
+  const [thicknessText, setThicknessText]       = useState(
     (info.avgThickness / THICKNESS_SCALE).toFixed(1),
   );
   const [thicknessChanged, setThicknessChanged] = useState(false);
+  const [activePreset, setActivePreset]         = useState<number | null>(null);
 
   const selectionLabel = [
-    info.strokeCount   > 0 ? `${info.strokeCount} stroke${info.strokeCount !== 1 ? 's' : ''}`     : null,
-    info.geometryCount > 0 ? `${info.geometryCount} shape${info.geometryCount !== 1 ? 's' : ''}`  : null,
+    info.strokeCount   > 0 ? `${info.strokeCount} stroke${info.strokeCount !== 1 ? 's' : ''}`    : null,
+    info.geometryCount > 0 ? `${info.geometryCount} shape${info.geometryCount !== 1 ? 's' : ''}` : null,
   ].filter(Boolean).join(', ');
 
   function parseThickness(): number {
@@ -47,23 +54,36 @@ export default function RestylePanel({info, onApply, onCancel, busy}: Props) {
 
   function handleColorPress(color: PenColor) {
     setSelectedColor(prev => (prev === color ? null : color));
+    setActivePreset(null);
   }
 
   function handleThinner() {
     const next = Math.max(THICKNESS_MIN, parseThickness() - THICKNESS_STEP);
     setThicknessText((next / THICKNESS_SCALE).toFixed(1));
     setThicknessChanged(true);
+    setActivePreset(null);
   }
 
   function handleThicker() {
     const next = parseThickness() + THICKNESS_STEP;
     setThicknessText((next / THICKNESS_SCALE).toFixed(1));
     setThicknessChanged(true);
+    setActivePreset(null);
   }
 
   function handleThicknessChange(text: string) {
     setThicknessText(text);
     setThicknessChanged(true);
+    setActivePreset(null);
+  }
+
+  function handleApplyPreset(index: number) {
+    const preset = presets[index];
+    if (!preset) return;
+    setSelectedColor(preset.color);
+    setThicknessText((preset.thickness / THICKNESS_SCALE).toFixed(1));
+    setThicknessChanged(true);
+    setActivePreset(index);
   }
 
   function handleApply() {
@@ -73,7 +93,8 @@ export default function RestylePanel({info, onApply, onCancel, busy}: Props) {
     });
   }
 
-  const canApply = selectedColor !== null || thicknessChanged;
+  const canApply    = selectedColor !== null || thicknessChanged;
+  const canSave     = selectedColor !== null;  // need at least a color to save a preset
 
   return (
     <View style={styles.container}>
@@ -81,6 +102,68 @@ export default function RestylePanel({info, onApply, onCancel, busy}: Props) {
 
         <Text style={styles.title}>Restyle</Text>
         <Text style={styles.subtitle}>{selectionLabel}</Text>
+
+        {/* Presets */}
+        <Text style={styles.sectionLabel}>Presets</Text>
+        <View style={styles.presetsColumn}>
+          {presets.map((preset, index) => {
+            const isActive  = activePreset === index;
+            const isEmpty   = preset === null;
+            const isGhost   = preset?.color === 'ghost';
+
+            return (
+              <View key={index} style={styles.presetRow}>
+                {/* Clear button */}
+                <TouchableOpacity
+                  style={[styles.presetSideButton, isEmpty && styles.presetSideButtonDisabled]}
+                  onPress={() => { onClearPreset(index); if (activePreset === index) setActivePreset(null); }}
+                  disabled={busy || isEmpty}>
+                  <Text style={[styles.presetSideButtonText, isEmpty && styles.presetSideButtonTextDisabled]}>
+                    −
+                  </Text>
+                </TouchableOpacity>
+
+                {/* Slot */}
+                <TouchableOpacity
+                  style={[
+                    styles.presetSlot,
+                    isActive && styles.presetSlotActive,
+                  ]}
+                  onPress={() => handleApplyPreset(index)}
+                  disabled={busy || isEmpty}>
+                  {isEmpty ? (
+                    <Text style={styles.presetEmpty}>—</Text>
+                  ) : (
+                    <View style={styles.presetContent}>
+                      <View style={[
+                        styles.presetSwatch,
+                        {backgroundColor: COLOR_SWATCH[preset.color]},
+                        isGhost && !isActive && styles.presetSwatchGhost,
+                        isGhost &&  isActive && styles.presetSwatchGhostActive,
+                      ]} />
+                      <Text style={[styles.presetLabel, isActive && styles.presetLabelActive]}>
+                        {PEN_COLOR_LABELS[preset.color]}
+                      </Text>
+                      <Text style={[styles.presetThickness, isActive && styles.presetLabelActive]}>
+                        {(preset.thickness / THICKNESS_SCALE).toFixed(1)}
+                      </Text>
+                    </View>
+                  )}
+                </TouchableOpacity>
+
+                {/* Save button */}
+                <TouchableOpacity
+                  style={[styles.presetSideButton, !canSave && styles.presetSideButtonDisabled]}
+                  onPress={() => { onSavePreset(index, selectedColor!, parseThickness()); setActivePreset(index); }}
+                  disabled={busy || !canSave}>
+                  <Text style={[styles.presetSideButtonText, !canSave && styles.presetSideButtonTextDisabled]}>
+                    +
+                  </Text>
+                </TouchableOpacity>
+              </View>
+            );
+          })}
+        </View>
 
         {/* Color row */}
         <Text style={styles.sectionLabel}>Color</Text>
@@ -150,7 +233,8 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'flex-start',
+    paddingTop: 24,
     backgroundColor: 'transparent',
   },
   card: {
@@ -183,6 +267,93 @@ const styles = StyleSheet.create({
     letterSpacing: 0.8,
     marginBottom: -6,
   },
+
+  // ── Presets ──
+  presetsColumn: {
+    gap: 8,
+  },
+  presetRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presetSideButton: {
+    width: 44,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+  },
+  presetSideButtonDisabled: {
+    borderColor: '#CCCCCC',
+    backgroundColor: '#FFFFFF',
+  },
+  presetSideButtonText: {
+    fontSize: 22,
+    color: '#000000',
+    lineHeight: 26,
+  },
+  presetSideButtonTextDisabled: {
+    color: '#CCCCCC',
+  },
+  presetSlot: {
+    flex: 1,
+    height: 44,
+    borderWidth: 1.5,
+    borderColor: '#CCCCCC',
+    borderRadius: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFFFFF',
+    paddingHorizontal: 10,
+  },
+  presetSlotActive: {
+    backgroundColor: '#000000',
+    borderColor: '#000000',
+  },
+  presetEmpty: {
+    fontSize: 16,
+    color: '#CCCCCC',
+  },
+  presetContent: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  presetSwatch: {
+    width: 18,
+    height: 18,
+    borderRadius: 3,
+    borderWidth: 1,
+    borderColor: '#AAAAAA',
+  },
+  presetSwatchGhost: {
+    borderWidth: 1.5,
+    borderColor: '#AAAAAA',
+    borderStyle: 'dashed',
+  },
+  presetSwatchGhostActive: {
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF',
+  },
+  presetLabel: {
+    fontSize: 14,
+    color: '#000000',
+    flex: 1,
+  },
+  presetThickness: {
+    fontSize: 14,
+    color: '#555555',
+    fontWeight: '600',
+  },
+  presetLabelActive: {
+    color: '#FFFFFF',
+  },
+
+  // ── Color row ──
   colorRow: {
     flexDirection: 'row',
     gap: 8,
@@ -224,6 +395,8 @@ const styles = StyleSheet.create({
     color: '#000000',
     fontWeight: '600',
   },
+
+  // ── Thickness row ──
   thicknessRow: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -261,6 +434,8 @@ const styles = StyleSheet.create({
     borderColor: '#000000',
     backgroundColor: '#F0F0F0',
   },
+
+  // ── Action row ──
   actionRow: {
     flexDirection: 'row',
     gap: 12,

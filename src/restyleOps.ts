@@ -1,5 +1,5 @@
 import {PluginCommAPI, PluginFileAPI, PluginNoteAPI, PointUtils} from 'sn-plugin-lib';
-import {PEN_COLOR_VALUES, THICKNESS_MIN, type LassoInfo, type RestyleOptions} from './types';
+import {PEN_COLOR_VALUES, THICKNESS_MIN, type ElementSnapshot, type LassoInfo, type RestyleOptions} from './types';
 
 type Res<T> = {success: boolean; result?: T; error?: {message?: string}} | null | undefined;
 type Rect  = {left: number; top: number; right: number; bottom: number};
@@ -47,35 +47,58 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     ? Math.round(thicknesses.reduce((a: number, b: number) => a + b, 0) / thicknesses.length)
     : 100;
 
+  // Check for H elements (TYPE_TITLE = 100) on any page — plugin is disabled when present
+  // to prevent known position corruption. Uses getAllPageElements (confirmed working) rather
+  // than getElementNumList (page indexing unconfirmed) or getTitles (unreliable without pageNum).
+  let hasHElements = false;
+  const totalPagesRes = (await (PluginFileAPI as any).getNoteTotalPageNum(ctx.filePath)) as Res<number>;
+  const totalPages = totalPagesRes?.result ?? 1;
+  for (let p = 1; p <= totalPages; p++) {
+    const pageElements = await getAllPageElements(p, ctx.filePath);
+    if (pageElements.some(el => el?.type === 100)) {
+      hasHElements = true;
+      break;
+    }
+  }
+
   return {
     ...ctx,
     strokeCount:   strokes.length,
     geometryCount: geos.length,
     avgThickness,
     elementNums,
+    hasHElements,
   };
 }
 
-export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Promise<void> {
-  if (options.color === null && options.thickness === null) return;
+export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Promise<ElementSnapshot[]> {
+  if (options.color === null && options.thickness === null) return [];
 
   const {filePath, pageNum, elementNums} = info;
 
-  // Save while lasso is still active — lasso is a UI overlay, not persisted to file
+  // Save while lasso is still active — lasso is a UI overlay, not persisted to file.
+  // Use getAllPageElements (single bulk call) — parallel getElement() calls freeze the device.
   await PluginNoteAPI.saveCurrentNote();
-
-  // Fetch only the targeted elements by index — faster than loading all page elements
-  const fetched = await Promise.all(
-    elementNums.map(n => (PluginFileAPI as any).getElement(filePath, pageNum, n) as Promise<Res<any>>),
+  const allFileElements = await getAllPageElements(pageNum, filePath);
+  const targets = allFileElements.filter(
+    el => el?.numInPage != null &&
+          elementNums.includes(el.numInPage) &&
+          (el.type === 0 || el.type === 700),
   );
-  const targets = fetched
-    .map(res => res?.result)
-    .filter(el => el != null && (el.type === 0 || el.type === 700));
 
   if (targets.length === 0) {
     await PluginCommAPI.reloadFile();
-    return;
+    return [];
   }
+
+  // Capture snapshot of original values before modifying — used for undo
+  const snapshot: ElementSnapshot[] = targets.map(el => ({
+    numInPage:         el.numInPage,
+    type:              el.type,
+    originalPenColor:  el.type === 0 ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
+    originalThickness: el.type === 0 ? (el.thickness ?? null) : null,
+    originalPenWidth:  el.type === 700 ? (el.geometry?.penWidth ?? null) : null,
+  }));
 
   for (const el of targets) {
     if (options.color !== null) {
@@ -91,6 +114,8 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
   await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
   // Reload from file — lasso clears naturally, no explicit commit
   await PluginCommAPI.reloadFile();
+
+  return snapshot;
 }
 
 // Reads the new positions of modified elements from the file and creates a
@@ -153,31 +178,27 @@ async function relassoElements(
   }
 }
 
-// Undo implementation — kept for future use, uncomment along with snapshot logic above
-// and the 'applied' AppScreen state in types.ts
-//
-// export async function undoRestyle(
-//   filePath: string,
-//   pageNum: number,
-//   snapshots: any[],
-// ): Promise<void> {
-//   if (snapshots.length === 0) return;
-//   await PluginNoteAPI.saveCurrentNote();
-//   const allElements = await getAllPageElements(pageNum, filePath);
-//   const snapMap = new Map(snapshots.map(s => [s.numInPage, s]));
-//   const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
-//   for (const el of targets) {
-//     const snap = snapMap.get(el.numInPage);
-//     if (!snap) continue;
-//     if (el.type === 0) {
-//       if (snap.originalPenColor !== null && el.stroke)  el.stroke.penColor = snap.originalPenColor;
-//       if (snap.originalThickness !== null)              el.thickness        = snap.originalThickness;
-//     }
-//     if (el.type === 700) {
-//       if (snap.originalPenColor !== null && el.geometry) el.geometry.penColor = snap.originalPenColor;
-//       if (snap.originalPenWidth !== null && el.geometry) el.geometry.penWidth = snap.originalPenWidth;
-//     }
-//   }
-//   await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
-//   await PluginCommAPI.reloadFile();
-// }
+export async function undoRestyle(
+  filePath: string,
+  pageNum: number,
+  snapshots: ElementSnapshot[],
+): Promise<void> {
+  if (snapshots.length === 0) return;
+  await PluginNoteAPI.saveCurrentNote();
+  const allElements = await getAllPageElements(pageNum, filePath);
+  const snapMap = new Map(snapshots.map(s => [s.numInPage, s]));
+  const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
+  for (const el of targets) {
+    const snap = snapMap.get(el.numInPage)!;
+    if (el.type === 0) {
+      if (snap.originalPenColor  !== null && el.stroke)   el.stroke.penColor = snap.originalPenColor;
+      if (snap.originalThickness !== null)                el.thickness        = snap.originalThickness;
+    }
+    if (el.type === 700) {
+      if (snap.originalPenColor !== null && el.geometry)  el.geometry.penColor = snap.originalPenColor;
+      if (snap.originalPenWidth !== null && el.geometry)  el.geometry.penWidth = snap.originalPenWidth;
+    }
+  }
+  await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
+  await PluginCommAPI.reloadFile();
+}

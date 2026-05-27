@@ -27,16 +27,21 @@ export interface LassoInfo {
   geometryCount: number;
   avgThickness: number;      // raw SDK value, used as stepper starting point
   elementNums: number[];     // numInPage values from lasso, for file-level lookup
+  hasHElements: boolean;     // true if note contains any H (title) elements — plugin disabled when set
 }
 
-// ElementSnapshot — kept for future Undo implementation
-// export interface ElementSnapshot {
-//   numInPage: number;
-//   type: number;
-//   originalPenColor: number | null;
-//   originalThickness: number | null;  // strokes: element.thickness
-//   originalPenWidth: number | null;   // geometry: geometry.penWidth
-// }
+export interface ElementSnapshot {
+  numInPage: number;
+  type: number;
+  originalPenColor: number | null;
+  originalThickness: number | null;  // strokes only: element.thickness
+  originalPenWidth: number | null;   // geometry only: geometry.penWidth
+}
+
+export interface Preset {
+  color: PenColor;
+  thickness: number;  // raw SDK value
+}
 
 export interface RestyleOptions {
   color: PenColor | null;    // null = no color change
@@ -46,6 +51,6 @@ export interface RestyleOptions {
 export type AppScreen =
   | {kind: 'detecting'}
   | {kind: 'panel'; info: LassoInfo}
-  // | {kind: 'applied'; snapshot: ElementSnapshot[]; filePath: string; pageNum: number}  // reserved for Undo
+  | {kind: 'undo'; snapshot: ElementSnapshot[]; filePath: string; pageNum: number}
   | {kind: 'working'; message: string}
   | {kind: 'error'; message: string};

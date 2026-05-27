@@ -3,17 +3,28 @@ import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react
 import {PluginManager} from 'sn-plugin-lib';
 import {getLastButtonEvent, installPluginRouter, subscribeToButtonEvents} from './src/pluginRouter';
 import RestylePanel from './src/RestylePanel';
-import {applyRestyle, getLassoInfo} from './src/restyleOps';
-import type {AppScreen, LassoInfo, RestyleOptions} from './src/types';
-// import type {ElementSnapshot} from './src/types';  // reserved for Undo
+import {applyRestyle, getLassoInfo, undoRestyle} from './src/restyleOps';
+import {loadPresets, savePresets} from './src/storage';
+import type {AppScreen, ElementSnapshot, LassoInfo, PenColor, Preset, RestyleOptions} from './src/types';
 
 installPluginRouter();
 
+// Module-level undo state — persists across plugin close/reopen within the same PluginHost session.
+// Cleared on undo, on "new restyle", or on plugin lifecycle stop.
+let pendingSnapshot: ElementSnapshot[] | null = null;
+let pendingSnapshotContext: {filePath: string; pageNum: number} | null = null;
+
 export default function App() {
-  const [screen, setScreen] = useState<AppScreen>({kind: 'detecting'});
-  const [busy, setBusy] = useState(false);
+  const [screen, setScreen]   = useState<AppScreen>({kind: 'detecting'});
+  const [busy, setBusy]       = useState(false);
+  const [presets, setPresets] = useState<(Preset | null)[]>([null, null, null, null]);
 
   const runDetect = useCallback(async () => {
+    // If a snapshot is pending from a previous apply, show the undo screen first
+    if (pendingSnapshot && pendingSnapshotContext) {
+      setScreen({kind: 'undo', snapshot: pendingSnapshot, ...pendingSnapshotContext});
+      return;
+    }
     setScreen({kind: 'detecting'});
     try {
       const info = await getLassoInfo();
@@ -24,14 +35,21 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    loadPresets().then(setPresets);
+
     const pending = getLastButtonEvent();
     if (pending) runDetect();
 
     const unsub = subscribeToButtonEvents(() => runDetect());
 
     const lifeSub = PluginManager.addPluginLifeListener({
-      onStart() {},
+      onStart() {
+        loadPresets().then(setPresets);
+      },
       onStop() {
+        // Clear undo state when plugin is fully closed — keeps things clean
+        pendingSnapshot = null;
+        pendingSnapshotContext = null;
         setScreen({kind: 'detecting'});
         setBusy(false);
       },
@@ -50,7 +68,12 @@ export default function App() {
       setBusy(true);
       setScreen({kind: 'working', message: 'Applying…'});
       try {
-        await applyRestyle(info, options);
+        const snapshot = await applyRestyle(info, options);
+        if (snapshot.length > 0) {
+          // Store snapshot so user can undo on next open
+          pendingSnapshot = snapshot;
+          pendingSnapshotContext = {filePath: info.filePath, pageNum: info.pageNum};
+        }
         PluginManager.closePluginView();
       } catch (e) {
         setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Apply failed'});
@@ -61,20 +84,53 @@ export default function App() {
     [screen, busy],
   );
 
-  // const handleUndo = useCallback(async () => {
-  //   if (screen.kind !== 'applied' || busy) return;
-  //   const {snapshot, filePath, pageNum} = screen;
-  //   setBusy(true);
-  //   setScreen({kind: 'working', message: 'Undoing…'});
-  //   try {
-  //     await undoRestyle(filePath, pageNum, snapshot);
-  //     PluginManager.closePluginView();
-  //   } catch (e) {
-  //     setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Undo failed'});
-  //   } finally {
-  //     setBusy(false);
-  //   }
-  // }, [screen, busy]);
+  const handleUndo = useCallback(async () => {
+    if (screen.kind !== 'undo' || busy) return;
+    const {snapshot, filePath, pageNum} = screen;
+    setBusy(true);
+    setScreen({kind: 'working', message: 'Undoing…'});
+    try {
+      await undoRestyle(filePath, pageNum, snapshot);
+      pendingSnapshot = null;
+      pendingSnapshotContext = null;
+      PluginManager.closePluginView();
+    } catch (e) {
+      setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Undo failed'});
+    } finally {
+      setBusy(false);
+    }
+  }, [screen, busy]);
+
+  const handleNewRestyle = useCallback(async () => {
+    // Discard pending snapshot and run a fresh detect on the current lasso selection
+    pendingSnapshot = null;
+    pendingSnapshotContext = null;
+    setScreen({kind: 'detecting'});
+    try {
+      const info = await getLassoInfo();
+      setScreen({kind: 'panel', info});
+    } catch (e) {
+      setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Could not read selection'});
+    }
+  }, []);
+
+  const handleSavePreset = useCallback(
+    (index: number, color: PenColor, thickness: number) => {
+      const updated = presets.map((p, i) => i === index ? {color, thickness} : p);
+      setPresets(updated);
+      savePresets(updated);
+    },
+    [presets],
+  );
+
+  const handleClearPreset = useCallback(
+    (index: number) => {
+      const updated = presets.map((p, i) => i === index ? null : p);
+      setPresets(updated);
+      savePresets(updated);
+    },
+    [presets],
+  );
 
   const handleCancel = useCallback(() => {
     PluginManager.closePluginView();
@@ -115,63 +171,66 @@ export default function App() {
     );
   }
 
+  if (screen.kind === 'undo') {
+    const count = screen.snapshot.length;
+    return (
+      <View style={styles.centered}>
+        <View style={styles.infoCard}>
+          <Text style={styles.infoTitle}>Restyle applied</Text>
+          <Text style={styles.infoSubtitle}>
+            {count} element{count !== 1 ? 's' : ''} changed
+          </Text>
+          <Text style={styles.infoHint}>Undo is only available this session.</Text>
+          <View style={styles.actionRow}>
+            <TouchableOpacity style={styles.undoButton} onPress={handleUndo} disabled={busy}>
+              <Text style={styles.undoText}>Undo</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy}>
+              <Text style={styles.applyText}>New Restyle</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </View>
+    );
+  }
+
   if (screen.kind === 'panel') {
+    // H-element notes: plugin disabled to prevent known position corruption
+    if (screen.info.hasHElements) {
+      return (
+        <View style={styles.centered}>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>Plugin Disabled</Text>
+            <Text style={styles.infoSubtitle}>
+              This note contains H (title) elements.
+            </Text>
+            <Text style={styles.infoHint}>
+              Restyling is disabled on notes with H elements to prevent element
+              positioning errors. Remove H elements or use a note without them.
+            </Text>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+              <Text style={styles.cancelText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <RestylePanel
         info={screen.info}
+        presets={presets}
         onApply={handleApply}
+        onSavePreset={handleSavePreset}
+        onClearPreset={handleClearPreset}
         onCancel={handleCancel}
         busy={busy}
       />
     );
   }
 
-  // if (screen.kind === 'applied') {
-  //   return (
-  //     <AppliedView
-  //       snapshot={screen.snapshot}
-  //       onUndo={handleUndo}
-  //       onDone={handleCancel}
-  //       busy={busy}
-  //     />
-  //   );
-  // }
-
   return null;
 }
-
-// ── Applied confirmation view — reserved for Undo ─────────────────────────────
-// function AppliedView({
-//   snapshot,
-//   onUndo,
-//   onDone,
-//   busy,
-// }: {
-//   snapshot: ElementSnapshot[];
-//   onUndo: () => void;
-//   onDone: () => void;
-//   busy: boolean;
-// }) {
-//   const count = snapshot.length;
-//   return (
-//     <View style={styles.centered}>
-//       <View style={styles.appliedCard}>
-//         <Text style={styles.appliedTitle}>Changes applied</Text>
-//         <Text style={styles.appliedSubtitle}>
-//           {count} element{count !== 1 ? 's' : ''} restyled
-//         </Text>
-//         <View style={styles.actionRow}>
-//           <TouchableOpacity style={styles.undoButton} onPress={onUndo} disabled={busy}>
-//             <Text style={styles.undoText}>Undo</Text>
-//           </TouchableOpacity>
-//           <TouchableOpacity style={styles.doneButton} onPress={onDone} disabled={busy}>
-//             <Text style={styles.doneText}>Done</Text>
-//           </TouchableOpacity>
-//         </View>
-//       </View>
-//     </View>
-//   );
-// }
 
 // ── Styles ────────────────────────────────────────────────────────────────────
 
@@ -205,6 +264,50 @@ const styles = StyleSheet.create({
   },
   errorTitle:   {fontSize: 17, fontWeight: '700', color: '#CC0000'},
   errorMessage: {fontSize: 15, color: '#555555', textAlign: 'center'},
-  // appliedCard, appliedTitle, appliedSubtitle, undoButton, undoText, doneButton, doneText
-  // — reserved for Undo/AppliedView when re-enabled
+  infoCard: {
+    backgroundColor: '#FFFFFF',
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    padding: 28,
+    alignItems: 'center',
+    gap: 12,
+    maxWidth: 400,
+    minWidth: 300,
+  },
+  infoTitle:    {fontSize: 18, fontWeight: '700', color: '#000000'},
+  infoSubtitle: {fontSize: 15, color: '#333333', textAlign: 'center'},
+  infoHint:     {fontSize: 13, color: '#888888', textAlign: 'center'},
+  actionRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  undoButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    alignItems: 'center',
+  },
+  undoText: {fontSize: 16, fontWeight: '600', color: '#000000'},
+  applyButton: {
+    flex: 1,
+    paddingVertical: 12,
+    borderRadius: 8,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+  },
+  applyText: {fontSize: 16, fontWeight: '600', color: '#FFFFFF'},
+  cancelButton: {
+    marginTop: 4,
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    borderRadius: 8,
+    borderWidth: 1.5,
+    borderColor: '#000000',
+    alignItems: 'center',
+  },
+  cancelText: {fontSize: 16, fontWeight: '600', color: '#000000'},
 });
