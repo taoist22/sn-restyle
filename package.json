@@ -1,6 +1,6 @@
 {
   "name": "Restyle",
-  "version": "0.1.0-beta",
+  "version": "0.2.0-beta",
   "description": "Lasso handwriting and geometry to restyle ink color and stroke thickness.",
   "private": true,
   "scripts": {
@@ -11,6 +11,7 @@
     "test": "jest"
   },
   "dependencies": {
+    "@react-native-async-storage/async-storage": "1.23.1",
     "react": "19.0.0",
     "react-native": "0.79.2",
     "sn-plugin-lib": "^0.1.43"
