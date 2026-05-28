@@ -24,51 +24,75 @@ async function getPageSize(filePath: string, pageNum: number): Promise<Size> {
   return res?.result ?? {width: 1404, height: 1872};
 }
 
+async function recycleAll(elements: any[]): Promise<void> {
+  for (const el of elements) {
+    try { await el?.recycle?.(); } catch { /* tolerate cleanup failures */ }
+  }
+}
+
+function clearCacheSafely(): void {
+  try { (PluginCommAPI as any).clearElementCache?.(); } catch { /* not critical */ }
+}
+
 export async function getLassoInfo(): Promise<LassoInfo> {
   const ctx = await getContext();
 
   const lassoRes = (await PluginCommAPI.getLassoElements()) as Res<any[]>;
   if (!lassoRes?.success) throw new Error('Cannot read lasso elements');
 
-  const elements: any[] = lassoRes.result ?? [];
-  const strokes  = elements.filter(el => el?.type === 0);
-  const geos     = elements.filter(el => el?.type === 700);
+  const lassoElements: any[] = lassoRes.result ?? [];
+  const allReadElements: any[] = [...lassoElements];
 
-  if (strokes.length === 0 && geos.length === 0) {
-    throw new Error('No strokes or geometry in selection');
-  }
+  try {
+    const strokes = lassoElements.filter(el => el?.type === 0);
+    const geos    = lassoElements.filter(el => el?.type === 700);
 
-  const elementNums = [...strokes, ...geos]
-    .map(el => el?.numInPage)
-    .filter((n): n is number => n != null);
-
-  const thicknesses = strokes.map(el => el?.thickness ?? 100).filter((t: number) => t > 0);
-  const avgThickness = thicknesses.length > 0
-    ? Math.round(thicknesses.reduce((a: number, b: number) => a + b, 0) / thicknesses.length)
-    : 100;
-
-  // Check for H elements (TYPE_TITLE = 100) on any page — plugin is disabled when present
-  // to prevent known position corruption. Uses getAllPageElements (confirmed working) rather
-  // than getElementNumList (page indexing unconfirmed) or getTitles (unreliable without pageNum).
-  let hasHElements = false;
-  const totalPagesRes = (await (PluginFileAPI as any).getNoteTotalPageNum(ctx.filePath)) as Res<number>;
-  const totalPages = totalPagesRes?.result ?? 1;
-  for (let p = 1; p <= totalPages; p++) {
-    const pageElements = await getAllPageElements(p, ctx.filePath);
-    if (pageElements.some(el => el?.type === 100)) {
-      hasHElements = true;
-      break;
+    if (strokes.length === 0 && geos.length === 0) {
+      throw new Error('No strokes or geometry in selection');
     }
-  }
 
-  return {
-    ...ctx,
-    strokeCount:   strokes.length,
-    geometryCount: geos.length,
-    avgThickness,
-    elementNums,
-    hasHElements,
-  };
+    const elementNums = [...strokes, ...geos]
+      .map(el => el?.numInPage)
+      .filter((n): n is number => n != null);
+
+    const thicknesses = strokes.map(el => el?.thickness ?? 100).filter((t: number) => t > 0);
+    const avgThickness = thicknesses.length > 0
+      ? Math.round(thicknesses.reduce((a: number, b: number) => a + b, 0) / thicknesses.length)
+      : 100;
+
+    // Detect freehand marker strokes — firmware caps their renderable width, so we
+    // disable thickness changes for them (color-only, matching OS behavior). Geometry
+    // drawn with the marker pen is unaffected.
+    const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
+
+    // Check for H elements (TYPE_TITLE = 100) on any page — plugin is disabled when present
+    // to prevent known position corruption. Uses getAllPageElements (confirmed working) rather
+    // than getElementNumList (page indexing unconfirmed) or getTitles (unreliable without pageNum).
+    let hasHElements = false;
+    const totalPagesRes = (await (PluginFileAPI as any).getNoteTotalPageNum(ctx.filePath)) as Res<number>;
+    const totalPages = totalPagesRes?.result ?? 1;
+    for (let p = 1; p <= totalPages; p++) {
+      const pageElements = await getAllPageElements(p, ctx.filePath);
+      allReadElements.push(...pageElements);
+      if (pageElements.some(el => el?.type === 100)) {
+        hasHElements = true;
+        break;
+      }
+    }
+
+    return {
+      ...ctx,
+      strokeCount:   strokes.length,
+      geometryCount: geos.length,
+      avgThickness,
+      elementNums,
+      hasHElements,
+      hasMarkerStroke,
+    };
+  } finally {
+    await recycleAll(allReadElements);
+    clearCacheSafely();
+  }
 }
 
 export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Promise<ElementSnapshot[]> {
@@ -80,42 +104,49 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
   // Use getAllPageElements (single bulk call) — parallel getElement() calls freeze the device.
   await PluginNoteAPI.saveCurrentNote();
   const allFileElements = await getAllPageElements(pageNum, filePath);
-  const targets = allFileElements.filter(
-    el => el?.numInPage != null &&
-          elementNums.includes(el.numInPage) &&
-          (el.type === 0 || el.type === 700),
-  );
 
-  if (targets.length === 0) {
+  try {
+    const targets = allFileElements.filter(
+      el => el?.numInPage != null &&
+            elementNums.includes(el.numInPage) &&
+            (el.type === 0 || el.type === 700),
+    );
+
+    if (targets.length === 0) {
+      await PluginCommAPI.reloadFile();
+      return [];
+    }
+
+    // Capture snapshot of original values before modifying — used for undo
+    const snapshot: ElementSnapshot[] = targets.map(el => ({
+      numInPage:         el.numInPage,
+      type:              el.type,
+      originalPenColor:  el.type === 0 ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
+      originalThickness: el.type === 0 ? (el.thickness ?? null) : null,
+      originalPenWidth:  el.type === 700 ? (el.geometry?.penWidth ?? null) : null,
+    }));
+
+    for (const el of targets) {
+      if (options.color !== null) {
+        if (el.type === 0   && el.stroke)   el.stroke.penColor   = PEN_COLOR_VALUES[options.color];
+        if (el.type === 700 && el.geometry) el.geometry.penColor = PEN_COLOR_VALUES[options.color];
+      }
+      if (options.thickness !== null) {
+        // Skip thickness for freehand marker strokes — see hasMarkerStroke note in getLassoInfo.
+        if (el.type === 0 && el.stroke?.penType !== 11)  el.thickness         = Math.max(THICKNESS_MIN, options.thickness);
+        if (el.type === 700 && el.geometry)              el.geometry.penWidth = Math.max(THICKNESS_MIN, options.thickness);
+      }
+    }
+
+    await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
+    // Reload from file — lasso clears naturally, no explicit commit
     await PluginCommAPI.reloadFile();
-    return [];
+
+    return snapshot;
+  } finally {
+    await recycleAll(allFileElements);
+    clearCacheSafely();
   }
-
-  // Capture snapshot of original values before modifying — used for undo
-  const snapshot: ElementSnapshot[] = targets.map(el => ({
-    numInPage:         el.numInPage,
-    type:              el.type,
-    originalPenColor:  el.type === 0 ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
-    originalThickness: el.type === 0 ? (el.thickness ?? null) : null,
-    originalPenWidth:  el.type === 700 ? (el.geometry?.penWidth ?? null) : null,
-  }));
-
-  for (const el of targets) {
-    if (options.color !== null) {
-      if (el.type === 0   && el.stroke)   el.stroke.penColor   = PEN_COLOR_VALUES[options.color];
-      if (el.type === 700 && el.geometry) el.geometry.penColor = PEN_COLOR_VALUES[options.color];
-    }
-    if (options.thickness !== null) {
-      if (el.type === 0)                   el.thickness         = Math.max(THICKNESS_MIN, options.thickness);
-      if (el.type === 700 && el.geometry)  el.geometry.penWidth = Math.max(THICKNESS_MIN, options.thickness);
-    }
-  }
-
-  await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
-  // Reload from file — lasso clears naturally, no explicit commit
-  await PluginCommAPI.reloadFile();
-
-  return snapshot;
 }
 
 // Reads the new positions of modified elements from the file and creates a
@@ -186,19 +217,25 @@ export async function undoRestyle(
   if (snapshots.length === 0) return;
   await PluginNoteAPI.saveCurrentNote();
   const allElements = await getAllPageElements(pageNum, filePath);
-  const snapMap = new Map(snapshots.map(s => [s.numInPage, s]));
-  const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
-  for (const el of targets) {
-    const snap = snapMap.get(el.numInPage)!;
-    if (el.type === 0) {
-      if (snap.originalPenColor  !== null && el.stroke)   el.stroke.penColor = snap.originalPenColor;
-      if (snap.originalThickness !== null)                el.thickness        = snap.originalThickness;
+
+  try {
+    const snapMap = new Map(snapshots.map(s => [s.numInPage, s]));
+    const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
+    for (const el of targets) {
+      const snap = snapMap.get(el.numInPage)!;
+      if (el.type === 0) {
+        if (snap.originalPenColor  !== null && el.stroke)   el.stroke.penColor = snap.originalPenColor;
+        if (snap.originalThickness !== null)                el.thickness        = snap.originalThickness;
+      }
+      if (el.type === 700) {
+        if (snap.originalPenColor !== null && el.geometry)  el.geometry.penColor = snap.originalPenColor;
+        if (snap.originalPenWidth !== null && el.geometry)  el.geometry.penWidth = snap.originalPenWidth;
+      }
     }
-    if (el.type === 700) {
-      if (snap.originalPenColor !== null && el.geometry)  el.geometry.penColor = snap.originalPenColor;
-      if (snap.originalPenWidth !== null && el.geometry)  el.geometry.penWidth = snap.originalPenWidth;
-    }
+    await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
+    await PluginCommAPI.reloadFile();
+  } finally {
+    await recycleAll(allElements);
+    clearCacheSafely();
   }
-  await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
-  await PluginCommAPI.reloadFile();
 }

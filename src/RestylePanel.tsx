@@ -81,8 +81,10 @@ export default function RestylePanel({
     const preset = presets[index];
     if (!preset) return;
     setSelectedColor(preset.color);
-    setThicknessText((preset.thickness / THICKNESS_SCALE).toFixed(1));
-    setThicknessChanged(true);
+    if (!info.hasMarkerStroke) {
+      setThicknessText((preset.thickness / THICKNESS_SCALE).toFixed(1));
+      setThicknessChanged(true);
+    }
     setActivePreset(index);
   }
 
@@ -192,24 +194,34 @@ export default function RestylePanel({
           })}
         </View>
 
-        {/* Thickness row */}
-        <Text style={styles.sectionLabel}>Thickness</Text>
-        <View style={styles.thicknessRow}>
-          <TouchableOpacity style={styles.stepButton} onPress={handleThinner} disabled={busy}>
-            <Text style={styles.stepButtonText}>−</Text>
-          </TouchableOpacity>
-          <TextInput
-            style={[styles.thicknessInput, thicknessChanged && styles.thicknessInputChanged]}
-            value={thicknessText}
-            onChangeText={handleThicknessChange}
-            keyboardType="decimal-pad"
-            selectTextOnFocus
-            editable={!busy}
-          />
-          <TouchableOpacity style={styles.stepButton} onPress={handleThicker} disabled={busy}>
-            <Text style={styles.stepButtonText}>+</Text>
-          </TouchableOpacity>
-        </View>
+        {/* Thickness row — hidden entirely when a marker stroke is in the selection */}
+        {!info.hasMarkerStroke && (
+          <>
+            <Text style={styles.sectionLabel}>Thickness</Text>
+            <View style={styles.thicknessRow}>
+              <TouchableOpacity style={styles.stepButton} onPress={handleThinner} disabled={busy}>
+                <Text style={styles.stepButtonText}>−</Text>
+              </TouchableOpacity>
+              <TextInput
+                style={[styles.thicknessInput, thicknessChanged && styles.thicknessInputChanged]}
+                value={thicknessText}
+                onChangeText={handleThicknessChange}
+                keyboardType="decimal-pad"
+                selectTextOnFocus
+                editable={!busy}
+              />
+              <TouchableOpacity style={styles.stepButton} onPress={handleThicker} disabled={busy}>
+                <Text style={styles.stepButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+          </>
+        )}
+
+        {info.hasMarkerStroke && (
+          <Text style={styles.markerNote}>
+            Marker strokes can only be recolored. To resize, hold the pen at the end of the stroke while drawing to convert it to a shape, then restyle the shape.
+          </Text>
+        )}
 
         {/* Action buttons */}
         <View style={styles.actionRow}>
@@ -433,6 +445,14 @@ const styles = StyleSheet.create({
   thicknessInputChanged: {
     borderColor: '#000000',
     backgroundColor: '#F0F0F0',
+  },
+  markerNote: {
+    fontSize: 13,
+    color: '#333333',
+    fontStyle: 'italic',
+    lineHeight: 18,
+    textAlign: 'center',
+    paddingHorizontal: 8,
   },
 
   // ── Action row ──

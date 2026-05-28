@@ -28,6 +28,7 @@ export interface LassoInfo {
   avgThickness: number;      // raw SDK value, used as stepper starting point
   elementNums: number[];     // numInPage values from lasso, for file-level lookup
   hasHElements: boolean;     // true if note contains any H (title) elements — plugin disabled when set
+  hasMarkerStroke: boolean;  // true if selection contains any freehand marker stroke (type=0, penType=11) — thickness control disabled
 }
 
 export interface ElementSnapshot {

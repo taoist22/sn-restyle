@@ -7,7 +7,7 @@
 ## Features
 
 - **Four ink colors** — Black, Dark Gray, Light Gray, and Ghost (white / invisible on white paper)
-- **Thickness adjustment** — step up or down in 0.1 increments, or type a value directly
+- **Thickness adjustment** — step up or down in 0.1 increments, or type a value directly (not available for marker strokes — see Limitations)
 - **Works on strokes and geometry** — lasso freehand handwriting, drawn shapes, or a mix of both
 - **Four user-defined presets** — save your favorite color + thickness combinations for one-tap access
 - **In-session undo** — revert your last restyle without leaving the note
@@ -46,19 +46,24 @@ Presets are saved permanently and survive closing and reopening the app.
 
 After you apply a restyle, the next time you open the Restyle panel in the same session it will show the **Undo** screen instead of the restyle controls.
 
-- Tap **Undo** to revert all changed elements back to their original color and thickness.
-- Tap **New Restyle** to discard the undo history and restyle a new selection.
+- Tap **Undo** to revert the most recent restyle. All elements that were changed in that operation are restored to their original color and thickness together.
+- Tap **New Restyle** to keep the most recent restyle and apply a fresh one to your current selection.
 
-> **Important:** Undo is only available within the same session. If you close the note and reopen it, the undo option will no longer be available.
+> **What Undo cannot do:**
+> - Undo only remembers the **single most recent** restyle. There is no per-element history — once you apply a new restyle or run Undo, the prior state is no longer available.
+> - Undo is not selection-aware. If you lasso an older restyled element and open the plugin, the Undo screen will still appear, but tapping it reverts the most recent restyle, not the element you selected.
+> - Undo state is cleared when you close the note, close the plugin host, or restart the device.
+>
+> **To revert an older restyle:** Lasso the element and apply your best estimate of the original color and thickness manually using the restyle controls.
 
 ## Creating a Header Background
 
-You can use Restyle to create a wide colored band that acts as a header background behind your text. This is a manual workflow — the plugin doesn't insert new elements, but it can transform any stroke into a thick wide band.
+You can use Restyle to create a wide colored band that acts as a header background behind your text. This is a manual workflow — the plugin doesn't insert new elements, but it can transform a straight-line shape into a thick wide band.
 
-1. Using the marker pen, draw a single horizontal stroke across the area where you want the header background.
-2. Lasso that stroke.
+1. Pick any pen and draw a single horizontal line, **holding the pen at the end of the stroke** so the Supernote converts it to a straight-line **shape**. (A freehand stroke that has not been converted to a shape cannot be thickened — see the marker stroke limitation below.)
+2. Lasso the shape.
 3. Open Restyle and choose the color you want for the background (Ghost gives an invisible-ink effect on white paper; Light Gray or Dark Gray give a visible band).
-4. Set the thickness to **100 or higher** — this is what creates the wide band effect.
+4. Set the thickness to a large value — this is what creates the wide band effect.
 5. Tap **Apply**.
 6. Write your header text anywhere on the page, then move it on top of the band.
 
@@ -73,6 +78,14 @@ If your note contains any **H elements** (outline/title markers, created by the 
 This restriction exists because the Supernote firmware renumbers note elements when a title is present, which can cause restyled strokes to move or disappear. Until this firmware behavior is resolved, Restyle is disabled on any note that contains H elements.
 
 **Workaround:** Use a note that does not contain H elements. If you need to add a visual header to a note, see the header background technique above.
+
+### Marker Strokes
+
+Freehand marker strokes can only have their **color** changed in Restyle — the thickness control is disabled whenever the lasso contains a marker stroke.
+
+This is intentional. The Supernote firmware caps the renderable width of a freehand marker stroke, and writing a thickness past that cap creates a mismatch between the visible stroke and the firmware's internal outline. When that happens the stroke becomes difficult or impossible to lasso again. The Supernote OS itself does not expose a thickness control for marker strokes for the same reason.
+
+**Workaround:** If you need a wider marker-like band, **hold the pen at the end of the stroke** as you draw it. The Supernote converts the result to a straight-line shape, which Restyle can thicken without limits. Other freehand pens (pressure pen, technical pen) are unaffected and can still be thickened normally.
 
 ## Building from Source
 

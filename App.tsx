@@ -183,7 +183,7 @@ export default function App() {
           <Text style={styles.infoHint}>Undo is only available this session.</Text>
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.undoButton} onPress={handleUndo} disabled={busy}>
-              <Text style={styles.undoText}>Undo</Text>
+              <Text style={styles.undoText}>Undo last</Text>
             </TouchableOpacity>
             <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy}>
               <Text style={styles.applyText}>New Restyle</Text>
