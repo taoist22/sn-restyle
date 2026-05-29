@@ -1,6 +1,6 @@
 import React, {useCallback, useEffect, useState} from 'react';
 import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
-import {PluginManager} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginManager} from 'sn-plugin-lib';
 import {getLastButtonEvent, installPluginRouter, subscribeToButtonEvents} from './src/pluginRouter';
 import RestylePanel from './src/RestylePanel';
 import {applyRestyle, getLassoInfo, undoRestyle} from './src/restyleOps';
@@ -20,7 +20,16 @@ export default function App() {
   const [presets, setPresets] = useState<(Preset | null)[]>([null, null, null, null]);
 
   const runDetect = useCallback(async () => {
-    // If a snapshot is pending from a previous apply, show the undo screen first
+    // If a snapshot is pending, verify it belongs to the current note before showing undo.
+    // The PluginHost JS context survives note switches, so onStop may not fire between notes.
+    if (pendingSnapshot && pendingSnapshotContext) {
+      const pathRes = (await (PluginCommAPI as any).getCurrentFilePath()) as {success: boolean; result?: string} | null;
+      const currentPath = pathRes?.result;
+      if (!currentPath || currentPath !== pendingSnapshotContext.filePath) {
+        pendingSnapshot = null;
+        pendingSnapshotContext = null;
+      }
+    }
     if (pendingSnapshot && pendingSnapshotContext) {
       setScreen({kind: 'undo', snapshot: pendingSnapshot, ...pendingSnapshotContext});
       return;
