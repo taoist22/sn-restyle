@@ -2,8 +2,8 @@
   "name": "Restyle",
   "desc": "Lasso handwriting and geometry to restyle ink color and stroke thickness.",
   "iconPath": "assets/icon/contract.png",
-  "versionName": "0.3.0-beta",
-  "versionCode": "3",
+  "versionName": "0.3.1-beta",
+  "versionCode": "4",
   "pluginID": "2w0frlxvgp8qvuil",
   "pluginKey": "Restyle",
   "jsMainPath": "index"

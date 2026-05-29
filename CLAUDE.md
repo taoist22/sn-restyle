@@ -24,3 +24,13 @@ rm -f build/outputs/Restyle.snplg build/outputs/Restyle.zip && JAVA_HOME=/Librar
 ```
 
 **Note:** First build after adding android/ requires two runs — `PackageList.java` is generated on the first Gradle build and populated on the second.
+
+**If a .ts change doesn't appear in the bundle:** Metro caches transpiled modules and sometimes ignores edits. Fix with `--reset-cache`:
+
+```
+rm -f build/outputs/Restyle.snplg build/outputs/Restyle.zip build/generated/Restyle.bundle
+npx react-native bundle --entry-file index.js --bundle-output build/generated/Restyle.bundle --platform android --assets-dest build/generated --dev false --reset-cache
+JAVA_HOME=/Library/Java/JavaVirtualMachines/zulu-21.jdk/Contents/Home ./buildPlugin.sh
+```
+
+**JSX Text children:** Never use `{'\n\n'}` or other expression children in `<Text>` components — multi-child arrays in plugin overlays break button registration at load time. Use separate `<Text>` elements instead.

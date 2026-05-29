@@ -65,20 +65,12 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     // drawn with the marker pen is unaffected.
     const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
 
-    // Check for H elements (TYPE_TITLE = 100) on any page — plugin is disabled when present
-    // to prevent known position corruption. Uses getAllPageElements (confirmed working) rather
-    // than getElementNumList (page indexing unconfirmed) or getTitles (unreliable without pageNum).
-    let hasHElements = false;
-    const totalPagesRes = (await (PluginFileAPI as any).getNoteTotalPageNum(ctx.filePath)) as Res<number>;
-    const totalPages = totalPagesRes?.result ?? 1;
-    for (let p = 1; p <= totalPages; p++) {
-      const pageElements = await getAllPageElements(p, ctx.filePath);
-      allReadElements.push(...pageElements);
-      if (pageElements.some(el => el?.type === 100)) {
-        hasHElements = true;
-        break;
-      }
-    }
+    // Check current page only for H elements (TYPE_TITLE = 100). H elements on other pages
+    // don't affect the current page's stroke.points coordinates, so a full-document scan is
+    // unnecessary — and very slow on large notes (O(n pages) sequential native calls).
+    const currentPageElements = await getAllPageElements(ctx.pageNum, ctx.filePath);
+    allReadElements.push(...currentPageElements);
+    const hasHElements = currentPageElements.some(el => el?.type === 100);
 
     return {
       ...ctx,
