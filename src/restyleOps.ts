@@ -34,38 +34,6 @@ function clearCacheSafely(): void {
   try { (PluginCommAPI as any).clearElementCache?.(); } catch { /* not critical */ }
 }
 
-// ── DIAGNOSTIC (h-element-diagnostic branch) ──────────────────────────────────
-// Logs the first sample point of up to 3 target strokes at a given stage so we
-// can see exactly where (if anywhere) positions shift on H-element pages.
-// Filter ADB logs by the [H-DIAG] tag. Remove before release.
-const DIAG = '[H-DIAG]';
-
-async function logPositions(
-  label: string,
-  elements: any[],
-  elementNums: number[],
-  pageSize: Size,
-): Promise<void> {
-  const targets = elements
-    .filter(el => el?.type === 0 && el?.numInPage != null && elementNums.includes(el.numInPage))
-    .slice(0, 3);
-  for (const el of targets) {
-    try {
-      const n: number = await el.stroke.points.size();
-      const p0: Point | null = n > 0 ? await el.stroke.points.get(0) : null;
-      const px = p0 ? PointUtils.emrPoint2Android(p0, pageSize) : null;
-      console.log(
-        `${DIAG} ${label} num=${el.numInPage} pts=${n} ` +
-        `emr=${p0 ? `${Math.round(p0.x)},${Math.round(p0.y)}` : 'none'} ` +
-        `px=${px ? `${Math.round(px.x)},${Math.round(px.y)}` : 'none'} ` +
-        `color=${el.stroke?.penColor} thick=${el.thickness}`,
-      );
-    } catch (e) {
-      console.log(`${DIAG} ${label} num=${el.numInPage} READ ERROR ${e instanceof Error ? e.message : String(e)}`);
-    }
-  }
-}
-
 export async function getLassoInfo(): Promise<LassoInfo> {
   const ctx = await getContext();
 
@@ -97,20 +65,12 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     // drawn with the marker pen is unaffected.
     const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
 
-    // Check current page only for H elements (TYPE_TITLE = 100). H elements on other pages
-    // don't affect the current page's stroke.points coordinates, so a full-document scan is
-    // unnecessary — and very slow on large notes (O(n pages) sequential native calls).
-    const currentPageElements = await getAllPageElements(ctx.pageNum, ctx.filePath);
-    allReadElements.push(...currentPageElements);
-    const hasHElements = currentPageElements.some(el => el?.type === 100);
-
     return {
       ...ctx,
       strokeCount:   strokes.length,
       geometryCount: geos.length,
       avgThickness,
       elementNums,
-      hasHElements,
       hasMarkerStroke,
     };
   } finally {
@@ -123,32 +83,14 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
   if (options.color === null && options.thickness === null) return [];
 
   const {filePath, pageNum, elementNums} = info;
-  const pageSize = await getPageSize(filePath, pageNum);
-  console.log(`${DIAG} === applyRestyle start hasH=${info.hasHElements} nums=${JSON.stringify(elementNums)} ===`);
 
-  // Stage 1 — lasso/floating positions (lasso is still active at this point).
-  try {
-    const lassoRes = (await PluginCommAPI.getLassoElements()) as Res<any[]>;
-    const lassoEls = lassoRes?.result ?? [];
-    await logPositions('1-lasso', lassoEls, elementNums, pageSize);
-    await recycleAll(lassoEls);
-  } catch (e) {
-    console.log(`${DIAG} 1-lasso read failed ${e instanceof Error ? e.message : String(e)}`);
-  }
-
-  // Stage 2 — after save, lasso STILL active (this is what the shipped code reads
-  // and modifies; suspected source of corrupt coords on H-pages).
+  // Flush strokes to file, then CLEAR the lasso before reading/modifying.
+  // modifyElements while a lasso is active corrupts stroke positions on notes
+  // containing H (title) elements; reloadFile drops the lasso/floating state so
+  // the write happens against clean coordinates. (Confirmed on-device 2026-06-04.)
   await PluginNoteAPI.saveCurrentNote();
-  const afterSave = await getAllPageElements(pageNum, filePath);
-  await logPositions('2-afterSave', afterSave, elementNums, pageSize);
-  await recycleAll(afterSave);
-  clearCacheSafely();
-
-  // Stage 3 (NEW) — clear the lasso/floating state, then read clean file positions.
-  // Hypothesis: getElements after reloadFile returns true coords even on H-pages.
   await PluginCommAPI.reloadFile();
   const allFileElements = await getAllPageElements(pageNum, filePath);
-  await logPositions('3-afterReload', allFileElements, elementNums, pageSize);
 
   try {
     const targets = allFileElements.filter(
@@ -158,8 +100,7 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
     );
 
     if (targets.length === 0) {
-      console.log(`${DIAG} no targets after reload — aborting`);
-      await PluginCommAPI.reloadFile();
+      // Lasso already cleared above; nothing further to do.
       return [];
     }
 
@@ -185,14 +126,8 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
     }
 
     await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
-    // Reload from file — lasso clears naturally, no explicit commit
+    // Reload to render the change.
     await PluginCommAPI.reloadFile();
-
-    // Stage 4 — final positions after modify. If these match Stage 3, positions
-    // were preserved (fix worked); if they jumped, the corruption survived.
-    const finalEls = await getAllPageElements(pageNum, filePath);
-    await logPositions('4-final', finalEls, elementNums, pageSize);
-    await recycleAll(finalEls);
 
     return snapshot;
   } finally {
@@ -267,7 +202,11 @@ export async function undoRestyle(
   snapshots: ElementSnapshot[],
 ): Promise<void> {
   if (snapshots.length === 0) return;
+  // Clear any active lasso before modifyElements (same H-element safety as
+  // applyRestyle) — covers the case where the plugin was opened via the lasso
+  // button while an undo was pending.
   await PluginNoteAPI.saveCurrentNote();
+  await PluginCommAPI.reloadFile();
   const allElements = await getAllPageElements(pageNum, filePath);
 
   try {

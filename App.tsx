@@ -14,11 +14,6 @@ installPluginRouter();
 let pendingSnapshot: ElementSnapshot[] | null = null;
 let pendingSnapshotContext: {filePath: string; pageNum: number} | null = null;
 
-// DIAGNOSTIC (h-element-diagnostic branch): when true, the H-element disable gate
-// is bypassed so we can run restyle on a titled note and capture position logs.
-// Set back to false (or delete) before any release.
-const DIAGNOSTIC_H_BYPASS = true;
-
 export default function App() {
   const [screen, setScreen]   = useState<AppScreen>({kind: 'detecting'});
   const [busy, setBusy]       = useState(false);
@@ -209,27 +204,6 @@ export default function App() {
   }
 
   if (screen.kind === 'panel') {
-    // H-element notes: plugin disabled to prevent known position corruption
-    if (screen.info.hasHElements && !DIAGNOSTIC_H_BYPASS) {
-      return (
-        <View style={styles.centered}>
-          <View style={styles.infoCard}>
-            <Text style={styles.infoTitle}>Plugin Disabled</Text>
-            <Text style={styles.infoSubtitle}>
-              This note contains H (title) elements.
-            </Text>
-            <Text style={styles.infoHint}>
-              Restyling is disabled on notes with H elements to prevent element
-              positioning errors. Remove H elements or use a note without them.
-            </Text>
-            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
-              <Text style={styles.cancelText}>Close</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      );
-    }
-
     return (
       <RestylePanel
         info={screen.info}
