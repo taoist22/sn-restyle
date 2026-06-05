@@ -75,13 +75,13 @@ You can use Restyle to create a wide colored band that acts as a header backgrou
 
 ## Limitations
 
-### Notes with H (Title) Elements
+### Notes from a different Supernote model ("Different Device")
 
-If your note contains any **H elements** (outline/title markers, created by the Supernote title feature), the Restyle plugin will show a **Plugin Disabled** message and cannot be used on that note.
+A note stores the page size of the device it was **created** on. If you open a note made on a different Supernote model (for example, a Nomad note opened on a Manta, or vice‑versa, after syncing), Restyle shows a **Different Device** notice and does nothing on that note.
 
-This restriction exists because the Supernote firmware renumbers note elements when a title is present, which can cause restyled strokes to move or disappear. Until this firmware behavior is resolved, Restyle is disabled on any note that contains H elements.
+This is deliberate: restyling relies on rewriting element data, and the page‑size mismatch between models would move your strokes out of place. Restyle that note on the device it was created on, where it works normally.
 
-**Workaround:** Use a note that does not contain H elements. If you need to add a visual header to a note, see the header background technique above.
+> Notes with **H (Title) elements** are now fully supported and restyle correctly — the earlier "Plugin Disabled on titled notes" restriction has been removed.
 
 ### Marker Strokes
 
