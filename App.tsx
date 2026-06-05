@@ -204,6 +204,28 @@ export default function App() {
   }
 
   if (screen.kind === 'panel') {
+    // Cross-device notes (created on a different Supernote model) corrupt stroke
+    // positions under modifyElements — disable rather than silently move strokes.
+    if (screen.info.crossDevice) {
+      return (
+        <View style={styles.centered}>
+          <View style={styles.infoCard}>
+            <Text style={styles.infoTitle}>Different Device</Text>
+            <Text style={styles.infoSubtitle}>
+              This note was created on a different Supernote model.
+            </Text>
+            <Text style={styles.infoHint}>
+              Restyling is disabled here to avoid moving your strokes. Open the
+              note on the device it was created on to restyle it.
+            </Text>
+            <TouchableOpacity style={styles.cancelButton} onPress={handleCancel}>
+              <Text style={styles.cancelText}>Close</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      );
+    }
+
     return (
       <RestylePanel
         info={screen.info}

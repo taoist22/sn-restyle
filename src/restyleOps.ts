@@ -1,4 +1,4 @@
-import {PluginCommAPI, PluginFileAPI, PluginNoteAPI, PointUtils} from 'sn-plugin-lib';
+import {PluginCommAPI, PluginFileAPI, PluginManager, PluginNoteAPI, PointUtils} from 'sn-plugin-lib';
 import {PEN_COLOR_VALUES, THICKNESS_MIN, type ElementSnapshot, type LassoInfo, type RestyleOptions} from './types';
 
 type Res<T> = {success: boolean; result?: T; error?: {message?: string}} | null | undefined;
@@ -34,6 +34,41 @@ function clearCacheSafely(): void {
   try { (PluginCommAPI as any).clearElementCache?.(); } catch { /* not critical */ }
 }
 
+// Native portrait canvas [width, height] by device type. A note carries its
+// CREATOR device's canvas size, so a mismatch with the current device's native
+// size means the note was made on a different Supernote model. modifyElements on
+// such cross-device notes corrupts stroke positions (canvas-vs-device coordinate
+// gap), so we detect and disable rather than silently move strokes.
+const DEVICE_NATIVE: Record<number, [number, number]> = {
+  3: [1404, 1872], // A5X
+  4: [1404, 1872], // Nomad (A6X2)
+  5: [1920, 2560], // Manta (A5X2)
+};
+
+function normSize(w: number, h: number): [number, number] {
+  return w <= h ? [w, h] : [h, w]; // orientation-independent
+}
+
+async function detectCrossDevice(filePath: string, pageNum: number): Promise<boolean> {
+  try {
+    const dt = (await (PluginManager as any).getDeviceType()) as unknown;
+    let deviceType: number | null = null;
+    if (typeof dt === 'number') deviceType = dt;
+    else if (dt && typeof (dt as any).result === 'number') deviceType = (dt as any).result;
+    if (deviceType == null) return false;
+
+    const native = DEVICE_NATIVE[deviceType];
+    if (!native) return false; // unknown device — don't block
+
+    const canvas = await getPageSize(filePath, pageNum);
+    const [cw, ch] = normSize(canvas.width, canvas.height);
+    const [nw, nh] = normSize(native[0], native[1]);
+    return cw !== nw || ch !== nh;
+  } catch {
+    return false; // can't determine — don't block
+  }
+}
+
 export async function getLassoInfo(): Promise<LassoInfo> {
   const ctx = await getContext();
 
@@ -65,6 +100,9 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     // drawn with the marker pen is unaffected.
     const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
 
+    // Cross-device note check (note canvas size vs this device's native size).
+    const crossDevice = await detectCrossDevice(ctx.filePath, ctx.pageNum);
+
     return {
       ...ctx,
       strokeCount:   strokes.length,
@@ -72,6 +110,7 @@ export async function getLassoInfo(): Promise<LassoInfo> {
       avgThickness,
       elementNums,
       hasMarkerStroke,
+      crossDevice,
     };
   } finally {
     await recycleAll(allReadElements);
