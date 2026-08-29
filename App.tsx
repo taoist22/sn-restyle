@@ -5,6 +5,7 @@ import {getLastButtonEvent, installPluginRouter, subscribeToButtonEvents} from '
 import RestylePanel from './src/RestylePanel';
 import {applyRestyle, getLassoInfo, undoRestyle} from './src/restyleOps';
 import {loadPresets, savePresets} from './src/storage';
+import {ensureFileReadPermission, ensureFileWritePermission} from './src/pluginPermissions';
 import type {AppScreen, ElementSnapshot, LassoInfo, Preset, RestyleOptions} from './src/types';
 
 installPluginRouter();
@@ -13,6 +14,14 @@ installPluginRouter();
 // Cleared on undo, on "new restyle", or on plugin lifecycle stop.
 let pendingSnapshot: ElementSnapshot[] | null = null;
 let pendingSnapshotContext: {filePath: string; pageNum: number} | null = null;
+
+function selectionErrorMessage(error: unknown): string {
+  const message = error instanceof Error ? error.message : '';
+  if (message === 'Cannot read lasso elements' || message === 'No strokes or geometry in selection') {
+    return 'Lasso a handwriting stroke or shape first, then open Restyle again.';
+  }
+  return message || 'Could not read the current selection.';
+}
 
 export default function App() {
   const [screen, setScreen]   = useState<AppScreen>({kind: 'detecting'});
@@ -36,10 +45,13 @@ export default function App() {
     }
     setScreen({kind: 'detecting'});
     try {
+      if (!await ensureFileReadPermission()) {
+        throw new Error('File read permission is required. Reopen Restyle and allow access when prompted.');
+      }
       const info = await getLassoInfo();
       setScreen({kind: 'panel', info});
     } catch (e) {
-      setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Could not read selection'});
+      setScreen({kind: 'error', message: selectionErrorMessage(e)});
     }
   }, []);
 
@@ -82,6 +94,9 @@ export default function App() {
       setBusy(true);
       setScreen({kind: 'working', message: 'Applying…'});
       try {
+        if (!await ensureFileWritePermission()) {
+          throw new Error('File write permission is required. Reopen Restyle and allow access when prompted.');
+        }
         const snapshot = await applyRestyle(info, options);
         if (snapshot.length > 0) {
           // Store snapshot so user can undo on next open
@@ -121,10 +136,13 @@ export default function App() {
     pendingSnapshotContext = null;
     setScreen({kind: 'detecting'});
     try {
+      if (!await ensureFileReadPermission()) {
+        throw new Error('File read permission is required. Reopen Restyle and allow access when prompted.');
+      }
       const info = await getLassoInfo();
       setScreen({kind: 'panel', info});
     } catch (e) {
-      setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Could not read selection'});
+      setScreen({kind: 'error', message: selectionErrorMessage(e)});
     }
   }, []);
 

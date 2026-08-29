@@ -13,7 +13,6 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 - **Four ink colors** — Black, Dark Gray, Light Gray, and Ghost (white / invisible on white paper)
 - **Familiar pen sizes** — choose the same millimetre labels used by Supernote's native size control
 - **Fine size adjustment** — move in 0.1 mm steps, including useful in-between sizes such as 1.1, 1.2, 1.3, and 1.4 mm (not available for marker strokes — see Limitations)
-- **Use current pen** — copy the active native pen width into Restyle before applying it to existing ink
 - **Wide Shape** — enlarge straight-line and other geometry widths by a clear relative multiplier, separately from pen sizing
 - **Works on strokes and geometry** — lasso freehand handwriting, drawn shapes, or a mix of both
 - **Four user-defined presets** — save your favorite color + thickness combinations for one-tap access
@@ -34,7 +33,7 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 2. Tap the **Restyle** button in the lasso toolbar.
 3. The plugin reads your selection and shows the Restyle panel.
 4. *(Optional)* Tap a **preset slot** to instantly load a saved color + thickness.
-5. Tap a color swatch to set the ink color. Choose a familiar native size, use **−** / **+** for 0.1 mm adjustments, or tap **Use current pen**.
+5. Tap a color swatch to set the ink color. Choose a familiar native size or use **−** / **+** for 0.1 mm adjustments.
 6. Tap **Apply** — the selected elements are updated and the page reloads.
 
 > **Tip:** You can change color only, size only, or both at once. If the selection contains several sizes, Restyle starts at their average and tells you that the selection is mixed.
@@ -69,10 +68,10 @@ Wide Shape is not a callout tool and does not create a background layer or image
 
 1. Draw a line and **hold the pen at the end** so Supernote converts it to a straight-line shape.
 2. Lasso the shape and open Restyle.
-3. In **Wide Shape**, choose **2×**, **4×**, **8×**, or **12×**. These are relative multipliers based on that shape's existing width, not millimetre pen sizes.
+3. In **Wide Shape**, choose **2×**, **4×**, **8×**, or **12×**. These are relative multipliers based on that shape's existing width, not millimetre pen sizes. On current firmware, 12× is the maximum width that renders and persists reliably.
 4. Optionally choose a color, then tap **Apply**.
 
-This is useful for dividers, emphasis bars, and other broad geometry. A Wide Shape setting can be saved as a preset, but it remains available only for shape-only selections.
+This is useful for dividers, emphasis bars, and other broad geometry. A Wide Shape setting can be saved as a preset, but it remains available only for shape-only selections. Stretching a lasso can change the line's length; its temporarily scaled thickness is only a preview, and Supernote returns to the saved Wide Shape width after deselection.
 
 ## Limitations
 
@@ -90,7 +89,7 @@ Freehand marker strokes can only have their **color** changed in Restyle — the
 
 This is intentional. The Supernote firmware caps the renderable width of a freehand marker stroke, and writing a thickness past that cap creates a mismatch between the visible stroke and the firmware's internal outline. When that happens the stroke becomes difficult or impossible to lasso again. The Supernote OS itself does not expose a thickness control for marker strokes for the same reason.
 
-**Workaround:** If you need a wider marker-like band, **hold the pen at the end of the stroke** as you draw it. The Supernote converts the result to a straight-line shape, which Restyle can thicken without limits. Other freehand pens (pressure pen, technical pen) are unaffected and can still be thickened normally.
+**Workaround:** If you need a wider marker-like band, **hold the pen at the end of the stroke** as you draw it. Supernote converts the result to a straight-line geometry, which Restyle can widen safely through the tested 12× setting. This avoids the selection-outline problem of oversized freehand marker strokes, but it does not remove the firmware's maximum rendered geometry width. Other freehand pens (pressure pen, technical pen) are unaffected and can still be resized normally.
 
 ## Building from Source
 

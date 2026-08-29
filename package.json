@@ -1,6 +1,6 @@
 {
   "name": "Restyle",
-  "version": "0.4.0-beta",
+  "version": "0.5.0-beta",
   "description": "Lasso handwriting and geometry to restyle ink color and stroke thickness.",
   "private": true,
   "scripts": {

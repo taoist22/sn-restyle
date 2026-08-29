@@ -26,7 +26,6 @@ export interface LassoInfo {
   avgThickness: number;      // raw SDK width across the editable selection
   avgGeometryWidth: number;  // raw SDK width used as Wide Shape's stable base
   hasMixedThickness: boolean;
-  currentPenWidth: number | null;
   elementNums: number[];     // numInPage values from lasso, for file-level lookup
   hasMarkerStroke: boolean;  // true if selection contains any freehand marker stroke (type=0, penType=11) — thickness control disabled
   crossDevice: boolean;      // true if the note's canvas size ≠ this device's native size (created on a different Supernote model) — restyle disabled to avoid position corruption

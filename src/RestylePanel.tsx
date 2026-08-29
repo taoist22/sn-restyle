@@ -38,8 +38,8 @@ const COLOR_SWATCH: Record<PenColor, string> = {
 };
 
 function presetSizeLabel(preset: Preset): string {
-  if (preset.sizeMode === 'wideShape' && preset.wideMultiplier) {
-    return `Wide ${preset.wideMultiplier}×`;
+  if (preset.sizeMode === 'wideShape') {
+    return preset.wideMultiplier ? `Wide ${preset.wideMultiplier}×` : 'Wide custom';
   }
   return formatPenSize(preset.thickness);
 }
@@ -237,7 +237,9 @@ export default function RestylePanel({
               <View style={[styles.sizeReadout, thicknessChanged && styles.sizeReadoutChanged]}>
                 <Text allowFontScaling={false} style={styles.sizeReadoutValue}>
                   {sizeMode === 'wideShape'
-                    ? `Wide ${wideMultiplier}×`
+                    ? wideMultiplier
+                      ? `Wide ${wideMultiplier}×`
+                      : 'Wide custom'
                     : `${selectedMillimetres.toFixed(1)} mm`}
                 </Text>
                 <Text allowFontScaling={false} style={styles.sizeReadoutLabel}>
@@ -251,17 +253,6 @@ export default function RestylePanel({
               </TouchableOpacity>
             </View>
 
-            {info.currentPenWidth !== null && (
-              <TouchableOpacity
-                style={styles.currentPenButton}
-                onPress={() => selectPenWidth(info.currentPenWidth!)}
-                disabled={busy}>
-                <Text allowFontScaling={false} style={styles.currentPenText}>
-                  Use current pen · {formatPenSize(info.currentPenWidth)}
-                </Text>
-              </TouchableOpacity>
-            )}
-
             {info.hasMixedThickness && !thicknessChanged && (
               <Text allowFontScaling={false} style={styles.mixedNote}>
                 Selection contains mixed sizes. The readout starts at their average.
@@ -272,7 +263,7 @@ export default function RestylePanel({
               <View style={styles.wideSection}>
                 <Text allowFontScaling={false} style={styles.wideTitle}>Wide Shape</Text>
                 <Text allowFontScaling={false} style={styles.wideDescription}>
-                  Geometry only. Multiply the selected shape’s current width without pretending it is a pen size.
+                  Geometry only. Multiply the selected shape’s saved width. 12× is the tested device maximum.
                 </Text>
                 <View style={styles.wideRow}>
                   {WIDE_SHAPE_MULTIPLIERS.map(multiplier => {
@@ -439,16 +430,6 @@ const styles = StyleSheet.create({
   sizeReadoutChanged: {borderColor: '#000000', backgroundColor: '#F0F0F0'},
   sizeReadoutValue: {fontSize: 18, fontWeight: '700', color: '#000000'},
   sizeReadoutLabel: {fontSize: 10, color: '#666666'},
-  currentPenButton: {
-    height: 40,
-    borderWidth: 1.5,
-    borderColor: '#777777',
-    borderRadius: 8,
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#FFFFFF',
-  },
-  currentPenText: {fontSize: 13, fontWeight: '600', color: '#222222'},
   mixedNote: {fontSize: 12, color: '#555555', fontStyle: 'italic', textAlign: 'center'},
   wideSection: {
     borderWidth: 1.5,

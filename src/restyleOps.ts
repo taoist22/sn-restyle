@@ -74,18 +74,12 @@ function normSize(w: number, h: number): [number, number] {
 async function detectCrossDevice(filePath: string, pageNum: number): Promise<boolean> {
   try {
     const deviceType = await PluginManager.getDeviceType();
-    if (deviceType == null) {return false;}
-
-    const machineRes = (await PluginFileAPI.getFileMachineType(filePath)) as Res<number>;
-    if (machineRes?.success && typeof machineRes.result === 'number') {
-      return machineRes.result !== deviceType;
-    }
-
-    // Older firmware fallback: compare canvas sizes when machine metadata is
-    // unavailable. This retains the v0.4.0 guard without guessing on failure.
     const native = DEVICE_NATIVE[deviceType];
     if (!native) {return false;} // unknown device — don't block
 
+    // Do not compare getFileMachineType() and getDeviceType() directly. Some
+    // firmware generations report different enum families for those calls.
+    // The page dimensions are the value that matters to coordinate safety.
     const canvas = await getPageSize(filePath, pageNum);
     const [cw, ch] = normSize(canvas.width, canvas.height);
     const [nw, nh] = normSize(native[0], native[1]);
@@ -132,11 +126,6 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     // drawn with the marker pen is unaffected.
     const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
 
-    const penRes = (await PluginCommAPI.getPenInfo()) as Res<{width?: number}>;
-    const currentPenWidth = penRes?.success && typeof penRes.result?.width === 'number'
-      ? penRes.result.width
-      : null;
-
     // Cross-device note check (note canvas size vs this device's native size).
     const crossDevice = await detectCrossDevice(ctx.filePath, ctx.pageNum);
 
@@ -147,7 +136,6 @@ export async function getLassoInfo(): Promise<LassoInfo> {
       avgThickness,
       avgGeometryWidth,
       hasMixedThickness,
-      currentPenWidth,
       elementNums,
       hasMarkerStroke,
       crossDevice,
