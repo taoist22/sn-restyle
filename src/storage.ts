@@ -9,9 +9,9 @@ const emptyPresets = (): (Preset | null)[] => Array(PRESET_COUNT).fill(null);
 export async function loadPresets(): Promise<(Preset | null)[]> {
   try {
     const raw = await AsyncStorage.getItem(PRESETS_KEY);
-    if (!raw) return emptyPresets();
+    if (!raw) {return emptyPresets();}
     const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed) || parsed.length !== PRESET_COUNT) return emptyPresets();
+    if (!Array.isArray(parsed) || parsed.length !== PRESET_COUNT) {return emptyPresets();}
     return parsed;
   } catch {
     return emptyPresets();

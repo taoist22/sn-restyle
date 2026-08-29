@@ -16,7 +16,7 @@ const subscribers = new Set<ButtonSubscriber>();
 let installed = false;
 
 export function installPluginRouter(): void {
-  if (installed) return;
+  if (installed) {return;}
   installed = true;
   PluginManager.registerButtonListener({
     onButtonPress(event: ButtonEvent) {

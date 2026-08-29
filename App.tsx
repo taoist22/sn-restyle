@@ -5,7 +5,7 @@ import {getLastButtonEvent, installPluginRouter, subscribeToButtonEvents} from '
 import RestylePanel from './src/RestylePanel';
 import {applyRestyle, getLassoInfo, undoRestyle} from './src/restyleOps';
 import {loadPresets, savePresets} from './src/storage';
-import type {AppScreen, ElementSnapshot, LassoInfo, PenColor, Preset, RestyleOptions} from './src/types';
+import type {AppScreen, ElementSnapshot, LassoInfo, Preset, RestyleOptions} from './src/types';
 
 installPluginRouter();
 
@@ -23,7 +23,7 @@ export default function App() {
     // If a snapshot is pending, verify it belongs to the current note before showing undo.
     // The PluginHost JS context survives note switches, so onStop may not fire between notes.
     if (pendingSnapshot && pendingSnapshotContext) {
-      const pathRes = (await (PluginCommAPI as any).getCurrentFilePath()) as {success: boolean; result?: string} | null;
+      const pathRes = (await PluginCommAPI.getCurrentFilePath()) as {success: boolean; result?: string} | null;
       const currentPath = pathRes?.result;
       if (!currentPath || currentPath !== pendingSnapshotContext.filePath) {
         pendingSnapshot = null;
@@ -47,20 +47,25 @@ export default function App() {
     loadPresets().then(setPresets);
 
     const pending = getLastButtonEvent();
-    if (pending) runDetect();
+    if (pending) {runDetect();}
 
     const unsub = subscribeToButtonEvents(() => runDetect());
 
-    const lifeSub = PluginManager.addPluginLifeListener({
-      onStart() {
-        loadPresets().then(setPresets);
-      },
-      onStop() {
-        // Clear undo state when plugin is fully closed — keeps things clean
-        pendingSnapshot = null;
-        pendingSnapshotContext = null;
-        setScreen({kind: 'detecting'});
-        setBusy(false);
+    const lifeSub = PluginManager.registerPluginLifeListener({
+      onMsg(message: unknown) {
+        const state = typeof message === 'number'
+          ? message
+          : message && typeof message === 'object' && typeof (message as {state?: unknown}).state === 'number'
+            ? (message as {state: number}).state
+            : null;
+        if (state === 2) {
+          loadPresets().then(setPresets);
+        } else if (state === 3 || state === 4 || state === 5) {
+          pendingSnapshot = null;
+          pendingSnapshotContext = null;
+          setScreen({kind: 'detecting'});
+          setBusy(false);
+        }
       },
     });
 
@@ -72,7 +77,7 @@ export default function App() {
 
   const handleApply = useCallback(
     async (options: RestyleOptions) => {
-      if (screen.kind !== 'panel' || busy) return;
+      if (screen.kind !== 'panel' || busy) {return;}
       const info: LassoInfo = screen.info;
       setBusy(true);
       setScreen({kind: 'working', message: 'Applying…'});
@@ -94,7 +99,7 @@ export default function App() {
   );
 
   const handleUndo = useCallback(async () => {
-    if (screen.kind !== 'undo' || busy) return;
+    if (screen.kind !== 'undo' || busy) {return;}
     const {snapshot, filePath, pageNum} = screen;
     setBusy(true);
     setScreen({kind: 'working', message: 'Undoing…'});
@@ -124,8 +129,8 @@ export default function App() {
   }, []);
 
   const handleSavePreset = useCallback(
-    (index: number, color: PenColor, thickness: number) => {
-      const updated = presets.map((p, i) => i === index ? {color, thickness} : p);
+    (index: number, preset: Preset) => {
+      const updated = presets.map((p, i) => i === index ? preset : p);
       setPresets(updated);
       savePresets(updated);
     },

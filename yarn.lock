@@ -5934,10 +5934,10 @@ slice-ansi@^2.0.0:
     astral-regex "^1.0.0"
     is-fullwidth-code-point "^2.0.0"
 
-sn-plugin-lib@^0.1.43:
-  version "0.1.43"
-  resolved "https://registry.npmjs.org/sn-plugin-lib/-/sn-plugin-lib-0.1.43.tgz"
-  integrity sha512-LDNFQJiL5OxK4FdlPX/+aCKmjM8XX6KAhidfui6++pgqjs0WkFbCgImo+/c7+WI1b1TtKLgvhmTBe0cSSoIa3w==
+sn-plugin-lib@^0.1.65:
+  version "0.1.65"
+  resolved "https://registry.npmjs.org/sn-plugin-lib/-/sn-plugin-lib-0.1.65.tgz"
+  integrity sha512-jMQhpOHyzi3AxyxO7kc4OwXYQKgQ7tQXSFYH1l5W4po4w2GXEBfg2mrD8x0otv2jbwjYwvUZ+VZLe0RJZCQWyA==
 
 source-map-support@~0.5.20:
   version "0.5.21"

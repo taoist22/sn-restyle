@@ -675,6 +675,10 @@ main() {
     local project_root="${1:-$(pwd)}"
     get_package_info "$project_root"
 
+    if [[ -f "$project_root/tools/patch-metro-watchers.js" ]] && command -v node >/dev/null 2>&1; then
+        node "$project_root/tools/patch-metro-watchers.js" "$project_root" --quiet || write_color_output "Metro watcher patch failed; continuing build" "Yellow"
+    fi
+
     local gen_dir
     gen_dir="$(ensure_build_generated_dir "$project_root")"
 
@@ -707,6 +711,13 @@ main() {
     fi
 
     if [[ "$should_build_native" -eq 0 ]]; then
+        # Build first so a clean checkout has a fresh autolink PackageList.java.
+        # Refuse to package when native code fails: Restyle requires AsyncStorage.
+        if ! build_android_apk "$project_root" "$gen_cfg"; then
+            write_color_output "APK build failed; refusing to package stale native output" "Red"
+            return 1
+        fi
+
         local autolink_pkgs
         autolink_pkgs="$(get_react_packages_from_autolinking_source "$project_root" "com.facebook.react.shell.MainReactPackage|com.ratta.supernote.note.plugincore.PluginPackage|com.ratta.supernote.pluginlib.PluginPackage" || true)"
 
@@ -714,10 +725,9 @@ main() {
         all_pkgs="$(printf "%s\n%s\n" "$project_react_pkgs" "$autolink_pkgs" | awk 'NF' | sort -u)"
         update_plugin_config_packages "$project_root" "$gen_dir" "$all_pkgs"
 
-        if build_android_apk "$project_root" "$gen_cfg"; then
-            copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg" || true
-        else
-            write_color_output "APK build failed" "Red"
+        if ! copy_apk_and_update_config "$project_root" "$gen_dir" "$gen_cfg"; then
+            write_color_output "APK packaging failed; refusing to create the plugin package" "Red"
+            return 1
         fi
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"

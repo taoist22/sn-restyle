@@ -7,14 +7,20 @@
     "android": "react-native run-android",
     "ios": "react-native run-ios",
     "lint": "eslint .",
+    "typecheck": "tsc --noEmit",
     "start": "react-native start",
-    "test": "jest"
+    "test": "jest",
+    "patch:metro-watchers": "node tools/patch-metro-watchers.js",
+    "prebuild": "npm run patch:metro-watchers",
+    "build": "./buildPlugin.sh",
+    "sync:version": "node tools/sync-plugin-version.js",
+    "validate:package": "node tools/validate-plugin-package.js"
   },
   "dependencies": {
     "@react-native-async-storage/async-storage": "1.23.1",
     "react": "19.0.0",
     "react-native": "0.79.2",
-    "sn-plugin-lib": "^0.1.43"
+    "sn-plugin-lib": "^0.1.65"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",

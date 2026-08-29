@@ -11,7 +11,10 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 ## Features
 
 - **Four ink colors** — Black, Dark Gray, Light Gray, and Ghost (white / invisible on white paper)
-- **Thickness adjustment** — step up or down in 0.1 increments, or type a value directly (not available for marker strokes — see Limitations)
+- **Familiar pen sizes** — choose the same millimetre labels used by Supernote's native size control
+- **Fine size adjustment** — move in 0.1 mm steps, including useful in-between sizes such as 1.1, 1.2, 1.3, and 1.4 mm (not available for marker strokes — see Limitations)
+- **Use current pen** — copy the active native pen width into Restyle before applying it to existing ink
+- **Wide Shape** — enlarge straight-line and other geometry widths by a clear relative multiplier, separately from pen sizing
 - **Works on strokes and geometry** — lasso freehand handwriting, drawn shapes, or a mix of both
 - **Four user-defined presets** — save your favorite color + thickness combinations for one-tap access
 - **In-session undo** — revert your last restyle without leaving the note
@@ -31,10 +34,10 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 2. Tap the **Restyle** button in the lasso toolbar.
 3. The plugin reads your selection and shows the Restyle panel.
 4. *(Optional)* Tap a **preset slot** to instantly load a saved color + thickness.
-5. Tap a color swatch to set the ink color, and use the **−** / **+** buttons (or type directly) to adjust thickness.
+5. Tap a color swatch to set the ink color. Choose a familiar native size, use **−** / **+** for 0.1 mm adjustments, or tap **Use current pen**.
 6. Tap **Apply** — the selected elements are updated and the page reloads.
 
-> **Tip:** You can change color only, thickness only, or both at once. The thickness field shows the average thickness of your selected strokes as a starting point.
+> **Tip:** You can change color only, size only, or both at once. If the selection contains several sizes, Restyle starts at their average and tells you that the selection is mixed.
 
 ## Presets
 
@@ -60,18 +63,16 @@ After you apply a restyle, the next time you open the Restyle panel in the same 
 >
 > **To revert an older restyle:** Lasso the element and apply your best estimate of the original color and thickness manually using the restyle controls.
 
-## Creating a Header Background
+## Wide Shape
 
-You can use Restyle to create a wide colored band that acts as a header background behind your text. This is a manual workflow — the plugin doesn't insert new elements, but it can transform a straight-line shape into a thick wide band.
+Wide Shape is not a callout tool and does not create a background layer or image. It changes the width property of an existing Supernote geometry element. The control appears only when the lasso contains shapes and no freehand strokes.
 
-1. Pick any pen and draw a single horizontal line, **holding the pen at the end of the stroke** so the Supernote converts it to a straight-line **shape**. (A freehand stroke that has not been converted to a shape cannot be thickened — see the marker stroke limitation below.)
-2. Lasso the shape.
-3. Open Restyle and choose the color you want for the background (Ghost gives an invisible-ink effect on white paper; Light Gray or Dark Gray give a visible band).
-4. Set the thickness to a large value — this is what creates the wide band effect.
-5. Tap **Apply**.
-6. Write your header text anywhere on the page, then move it on top of the band.
+1. Draw a line and **hold the pen at the end** so Supernote converts it to a straight-line shape.
+2. Lasso the shape and open Restyle.
+3. In **Wide Shape**, choose **2×**, **4×**, **8×**, or **12×**. These are relative multipliers based on that shape's existing width, not millimetre pen sizes.
+4. Optionally choose a color, then tap **Apply**.
 
-> **Tip:** Save your preferred background color and thickness as a preset so you can apply this look in one tap next time.
+This is useful for dividers, emphasis bars, and other broad geometry. A Wide Shape setting can be saved as a preset, but it remains available only for shape-only selections.
 
 ## Limitations
 
@@ -96,13 +97,17 @@ This is intentional. The Supernote firmware caps the renderable width of a freeh
 ### Prerequisites
 
 - [Node.js](https://nodejs.org/) (v18+)
-- Yarn
+- npm
 
 ### Build
 
 ```bash
-yarn install
-./buildPlugin.sh
+npm ci
+npm run typecheck
+npm test -- --runInBand
+npm run lint -- --max-warnings=0
+npm run build
+npm run validate:package -- --native
 ```
 
 The plugin file will be generated at `build/outputs/Restyle.snplg`.

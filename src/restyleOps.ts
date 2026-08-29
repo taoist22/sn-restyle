@@ -1,22 +1,44 @@
-import {PluginCommAPI, PluginFileAPI, PluginManager, PluginNoteAPI, PointUtils} from 'sn-plugin-lib';
+import {Element, PluginCommAPI, PluginFileAPI, PluginManager, PluginNoteAPI} from 'sn-plugin-lib';
 import {PEN_COLOR_VALUES, THICKNESS_MIN, type ElementSnapshot, type LassoInfo, type RestyleOptions} from './types';
 
 type Res<T> = {success: boolean; result?: T; error?: {message?: string}} | null | undefined;
-type Rect  = {left: number; top: number; right: number; bottom: number};
-type Point = {x: number; y: number};
 type Size  = {width: number; height: number};
+
+function errorMessage<T>(res: Res<T>, fallback: string): string {
+  return res?.error?.message || fallback;
+}
+
+async function saveCurrentNote(): Promise<void> {
+  const res = (await PluginNoteAPI.saveCurrentNote()) as Res<boolean>;
+  if (!res?.success) {throw new Error(errorMessage(res, 'Could not save the current note'));}
+}
+
+async function reloadCurrentFile(): Promise<void> {
+  const res = (await PluginCommAPI.reloadFile()) as Res<boolean>;
+  if (!res?.success) {throw new Error(errorMessage(res, 'Could not reload the current note'));}
+}
 
 async function getContext(): Promise<{filePath: string; pageNum: number}> {
   const pathRes = (await PluginCommAPI.getCurrentFilePath()) as Res<string>;
   const pageRes = (await PluginCommAPI.getCurrentPageNum()) as Res<number>;
-  if (!pathRes?.success || !pathRes.result) throw new Error('Cannot read file path');
-  if (!pageRes?.success || pageRes.result == null) throw new Error('Cannot read page number');
+  if (!pathRes?.success || !pathRes.result) {throw new Error('Cannot read file path');}
+  if (!pageRes?.success || pageRes.result == null) {throw new Error('Cannot read page number');}
   return {filePath: pathRes.result, pageNum: pageRes.result};
 }
 
 async function getAllPageElements(pageNum: number, filePath: string): Promise<any[]> {
   const res = (await (PluginFileAPI as any).getElements(pageNum, filePath)) as Res<any[]>;
-  return res?.result ?? [];
+  if (!res?.success) {throw new Error(errorMessage(res, 'Cannot read page elements'));}
+
+  // Firmware has occasionally returned the same element more than once. Keep
+  // one native object per UUID/element number so style writes are deterministic.
+  const seen = new Set<string>();
+  return (res.result ?? []).filter(el => {
+    const key = String(el?.uuid ?? `num:${el?.numInPage}`);
+    if (seen.has(key)) {return false;}
+    seen.add(key);
+    return true;
+  });
 }
 
 async function getPageSize(filePath: string, pageNum: number): Promise<Size> {
@@ -51,14 +73,18 @@ function normSize(w: number, h: number): [number, number] {
 
 async function detectCrossDevice(filePath: string, pageNum: number): Promise<boolean> {
   try {
-    const dt = (await (PluginManager as any).getDeviceType()) as unknown;
-    let deviceType: number | null = null;
-    if (typeof dt === 'number') deviceType = dt;
-    else if (dt && typeof (dt as any).result === 'number') deviceType = (dt as any).result;
-    if (deviceType == null) return false;
+    const deviceType = await PluginManager.getDeviceType();
+    if (deviceType == null) {return false;}
 
+    const machineRes = (await PluginFileAPI.getFileMachineType(filePath)) as Res<number>;
+    if (machineRes?.success && typeof machineRes.result === 'number') {
+      return machineRes.result !== deviceType;
+    }
+
+    // Older firmware fallback: compare canvas sizes when machine metadata is
+    // unavailable. This retains the v0.4.0 guard without guessing on failure.
     const native = DEVICE_NATIVE[deviceType];
-    if (!native) return false; // unknown device — don't block
+    if (!native) {return false;} // unknown device — don't block
 
     const canvas = await getPageSize(filePath, pageNum);
     const [cw, ch] = normSize(canvas.width, canvas.height);
@@ -73,14 +99,14 @@ export async function getLassoInfo(): Promise<LassoInfo> {
   const ctx = await getContext();
 
   const lassoRes = (await PluginCommAPI.getLassoElements()) as Res<any[]>;
-  if (!lassoRes?.success) throw new Error('Cannot read lasso elements');
+  if (!lassoRes?.success) {throw new Error('Cannot read lasso elements');}
 
   const lassoElements: any[] = lassoRes.result ?? [];
   const allReadElements: any[] = [...lassoElements];
 
   try {
-    const strokes = lassoElements.filter(el => el?.type === 0);
-    const geos    = lassoElements.filter(el => el?.type === 700);
+    const strokes = lassoElements.filter(el => el?.type === Element.TYPE_STROKE);
+    const geos    = lassoElements.filter(el => el?.type === Element.TYPE_GEO);
 
     if (strokes.length === 0 && geos.length === 0) {
       throw new Error('No strokes or geometry in selection');
@@ -90,15 +116,26 @@ export async function getLassoInfo(): Promise<LassoInfo> {
       .map(el => el?.numInPage)
       .filter((n): n is number => n != null);
 
-    const thicknesses = strokes.map(el => el?.thickness ?? 100).filter((t: number) => t > 0);
-    const avgThickness = thicknesses.length > 0
-      ? Math.round(thicknesses.reduce((a: number, b: number) => a + b, 0) / thicknesses.length)
+    const strokeWidths = strokes.map(el => el?.thickness).filter((t): t is number => t > 0);
+    const geometryWidths = geos.map(el => el?.geometry?.penWidth).filter((t): t is number => t > 0);
+    const widths = [...strokeWidths, ...geometryWidths];
+    const avgThickness = widths.length > 0
+      ? Math.round(widths.reduce((a, b) => a + b, 0) / widths.length)
       : 100;
+    const avgGeometryWidth = geometryWidths.length > 0
+      ? Math.round(geometryWidths.reduce((a, b) => a + b, 0) / geometryWidths.length)
+      : 100;
+    const hasMixedThickness = new Set(widths).size > 1;
 
     // Detect freehand marker strokes — firmware caps their renderable width, so we
     // disable thickness changes for them (color-only, matching OS behavior). Geometry
     // drawn with the marker pen is unaffected.
     const hasMarkerStroke = strokes.some(el => el?.stroke?.penType === 11);
+
+    const penRes = (await PluginCommAPI.getPenInfo()) as Res<{width?: number}>;
+    const currentPenWidth = penRes?.success && typeof penRes.result?.width === 'number'
+      ? penRes.result.width
+      : null;
 
     // Cross-device note check (note canvas size vs this device's native size).
     const crossDevice = await detectCrossDevice(ctx.filePath, ctx.pageNum);
@@ -108,6 +145,9 @@ export async function getLassoInfo(): Promise<LassoInfo> {
       strokeCount:   strokes.length,
       geometryCount: geos.length,
       avgThickness,
+      avgGeometryWidth,
+      hasMixedThickness,
+      currentPenWidth,
       elementNums,
       hasMarkerStroke,
       crossDevice,
@@ -119,7 +159,7 @@ export async function getLassoInfo(): Promise<LassoInfo> {
 }
 
 export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Promise<ElementSnapshot[]> {
-  if (options.color === null && options.thickness === null) return [];
+  if (options.color === null && options.thickness === null) {return [];}
 
   const {filePath, pageNum, elementNums} = info;
 
@@ -127,15 +167,15 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
   // modifyElements while a lasso is active corrupts stroke positions on notes
   // containing H (title) elements; reloadFile drops the lasso/floating state so
   // the write happens against clean coordinates. (Confirmed on-device 2026-06-04.)
-  await PluginNoteAPI.saveCurrentNote();
-  await PluginCommAPI.reloadFile();
+  await saveCurrentNote();
+  await reloadCurrentFile();
   const allFileElements = await getAllPageElements(pageNum, filePath);
 
   try {
     const targets = allFileElements.filter(
       el => el?.numInPage != null &&
             elementNums.includes(el.numInPage) &&
-            (el.type === 0 || el.type === 700),
+            (el.type === Element.TYPE_STROKE || el.type === Element.TYPE_GEO),
     );
 
     if (targets.length === 0) {
@@ -147,26 +187,27 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
     const snapshot: ElementSnapshot[] = targets.map(el => ({
       numInPage:         el.numInPage,
       type:              el.type,
-      originalPenColor:  el.type === 0 ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
-      originalThickness: el.type === 0 ? (el.thickness ?? null) : null,
-      originalPenWidth:  el.type === 700 ? (el.geometry?.penWidth ?? null) : null,
+      originalPenColor:  el.type === Element.TYPE_STROKE ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
+      originalThickness: el.type === Element.TYPE_STROKE ? (el.thickness ?? null) : null,
+      originalPenWidth:  el.type === Element.TYPE_GEO ? (el.geometry?.penWidth ?? null) : null,
     }));
 
     for (const el of targets) {
       if (options.color !== null) {
-        if (el.type === 0   && el.stroke)   el.stroke.penColor   = PEN_COLOR_VALUES[options.color];
-        if (el.type === 700 && el.geometry) el.geometry.penColor = PEN_COLOR_VALUES[options.color];
+        if (el.type === Element.TYPE_STROKE && el.stroke) {el.stroke.penColor = PEN_COLOR_VALUES[options.color];}
+        if (el.type === Element.TYPE_GEO && el.geometry) {el.geometry.penColor = PEN_COLOR_VALUES[options.color];}
       }
       if (options.thickness !== null) {
         // Skip thickness for freehand marker strokes — see hasMarkerStroke note in getLassoInfo.
-        if (el.type === 0 && el.stroke?.penType !== 11)  el.thickness         = Math.max(THICKNESS_MIN, options.thickness);
-        if (el.type === 700 && el.geometry)              el.geometry.penWidth = Math.max(THICKNESS_MIN, options.thickness);
+        if (el.type === Element.TYPE_STROKE && el.stroke?.penType !== 11) {el.thickness = Math.max(THICKNESS_MIN, options.thickness);}
+        if (el.type === Element.TYPE_GEO && el.geometry) {el.geometry.penWidth = Math.max(THICKNESS_MIN, options.thickness);}
       }
     }
 
-    await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
+    const modifyRes = (await PluginFileAPI.modifyElements(filePath, pageNum, targets)) as Res<number[]>;
+    if (!modifyRes?.success) {throw new Error(errorMessage(modifyRes, 'Restyle write failed'));}
     // Reload to render the change.
-    await PluginCommAPI.reloadFile();
+    await reloadCurrentFile();
 
     return snapshot;
   } finally {
@@ -175,77 +216,17 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
   }
 }
 
-// Reads the new positions of modified elements from the file and creates a
-// lasso selection around them so the user can immediately drag to reposition.
-async function relassoElements(
-  elementNums: number[],
-  pageNum: number,
-  filePath: string,
-): Promise<void> {
-  try {
-    const pageSize = await getPageSize(filePath, pageNum);
-    const allElements = await getAllPageElements(pageNum, filePath);
-    const targets = allElements.filter(
-      el => el?.numInPage != null && elementNums.includes(el.numInPage),
-    );
-
-    if (targets.length === 0) return;
-
-    let minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
-
-    for (const el of targets) {
-      if (el.type === 0 && el.stroke) {
-        const count: number = await el.stroke.points.size();
-        if (count > 0) {
-          const pt: Point | null = await el.stroke.points.get(0);
-          if (pt) {
-            const px = PointUtils.emrPoint2Android(pt, pageSize);
-            minX = Math.min(minX, px.x); minY = Math.min(minY, px.y);
-            maxX = Math.max(maxX, px.x); maxY = Math.max(maxY, px.y);
-          }
-        }
-      } else if (el.type === 700 && el.geometry) {
-        const geo = el.geometry;
-        if (geo.ellipseCenterPoint) {
-          const c: Point = geo.ellipseCenterPoint;
-          minX = Math.min(minX, c.x); minY = Math.min(minY, c.y);
-          maxX = Math.max(maxX, c.x); maxY = Math.max(maxY, c.y);
-        } else if (geo.points?.[0]) {
-          for (const p of geo.points as Point[]) {
-            minX = Math.min(minX, p.x); minY = Math.min(minY, p.y);
-            maxX = Math.max(maxX, p.x); maxY = Math.max(maxY, p.y);
-          }
-        }
-      }
-    }
-
-    if (minX === Infinity) return;
-
-    const PAD = 200;
-    const rect: Rect = {
-      left:   Math.max(0, minX - PAD),
-      top:    Math.max(0, minY - PAD),
-      right:  maxX + PAD,
-      bottom: maxY + PAD,
-    };
-
-    await (PluginCommAPI as any).lassoElements(rect);
-  } catch {
-    // Re-lasso is a convenience; if it fails, the apply still succeeded
-  }
-}
-
 export async function undoRestyle(
   filePath: string,
   pageNum: number,
   snapshots: ElementSnapshot[],
 ): Promise<void> {
-  if (snapshots.length === 0) return;
+  if (snapshots.length === 0) {return;}
   // Clear any active lasso before modifyElements (same H-element safety as
   // applyRestyle) — covers the case where the plugin was opened via the lasso
   // button while an undo was pending.
-  await PluginNoteAPI.saveCurrentNote();
-  await PluginCommAPI.reloadFile();
+  await saveCurrentNote();
+  await reloadCurrentFile();
   const allElements = await getAllPageElements(pageNum, filePath);
 
   try {
@@ -253,17 +234,18 @@ export async function undoRestyle(
     const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
     for (const el of targets) {
       const snap = snapMap.get(el.numInPage)!;
-      if (el.type === 0) {
-        if (snap.originalPenColor  !== null && el.stroke)   el.stroke.penColor = snap.originalPenColor;
-        if (snap.originalThickness !== null)                el.thickness        = snap.originalThickness;
+      if (el.type === Element.TYPE_STROKE) {
+        if (snap.originalPenColor  !== null && el.stroke)   {el.stroke.penColor = snap.originalPenColor;}
+        if (snap.originalThickness !== null)                {el.thickness        = snap.originalThickness;}
       }
-      if (el.type === 700) {
-        if (snap.originalPenColor !== null && el.geometry)  el.geometry.penColor = snap.originalPenColor;
-        if (snap.originalPenWidth !== null && el.geometry)  el.geometry.penWidth = snap.originalPenWidth;
+      if (el.type === Element.TYPE_GEO) {
+        if (snap.originalPenColor !== null && el.geometry)  {el.geometry.penColor = snap.originalPenColor;}
+        if (snap.originalPenWidth !== null && el.geometry)  {el.geometry.penWidth = snap.originalPenWidth;}
       }
     }
-    await (PluginFileAPI as any).modifyElements(filePath, pageNum, targets);
-    await PluginCommAPI.reloadFile();
+    const modifyRes = (await PluginFileAPI.modifyElements(filePath, pageNum, targets)) as Res<number[]>;
+    if (!modifyRes?.success) {throw new Error(errorMessage(modifyRes, 'Undo write failed'));}
+    await reloadCurrentFile();
   } finally {
     await recycleAll(allElements);
     clearCacheSafely();
