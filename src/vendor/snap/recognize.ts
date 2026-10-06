@@ -1,4 +1,4 @@
-// Verbatim copy of CharlesCheval/supernote-snap src/recognize.ts (MIT, see ../supernote-snap/LICENSE), fetched 2026-10-05.
+// Verbatim copy of CharlesCheval/supernote-snap src/recognize.ts (MIT, see LICENSE in this directory), fetched 2026-10-05.
 /**
  * Rectangle / circle recognition from the points of a single stroke (pixels).
  * Pure logic, no SDK, so it can be unit-tested.

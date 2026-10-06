@@ -22,7 +22,7 @@ Lasso **one stroke**, open Restyle and use the **Shape** tab. Pick **Auto** or a
 
 The panel has a **Shape** tab and a **Style** tab with Apply and Cancel always visible. Shapes need exactly one stroke selected. Single native shapes use the lasso geometry styling API; multi-element styling keeps the title-safe save/reload/file-write sequence.
 
-Not built: dashed and dotted lines, filling hand-drawn strokes, multi-stroke shapes, panel controls for the elbow's legs. Shape cleanup is not covered by Restyle's undo; use Supernote's own undo or delete the pieces. An older recovery record from 0.6.0–0.6.6 builds can still be restored from the panel.
+Not built: dashed and dotted lines, filling hand-drawn strokes, multi-stroke shapes, panel controls for the elbow's legs. Shape cleanup is not covered by Restyle's undo; use Supernote's own undo or delete the pieces.
 
 See [TEST_MATRIX.md](TEST_MATRIX.md) for the on-device checks.
 
@@ -35,7 +35,7 @@ See [TEST_MATRIX.md](TEST_MATRIX.md) for the on-device checks.
 - **Works on strokes and geometry** — lasso freehand handwriting, drawn shapes, or a mix of both
 - **Clean shapes, fills and axes** — turn one rough stroke into a native shape; gray or white fill; configurable axes
 - **Four user-defined presets** — save your favorite color + thickness combinations for one-tap access
-- **Undo last operation** — style undo within the session; cleanup includes a durable original-stroke recovery record
+- **Undo last operation** — style undo within the session
 - **Non-destructive** — elements stay exactly where they are; only color and thickness change
 - **Works on Nomad and Manta**
 
@@ -132,7 +132,7 @@ The plugin file will be generated at `build/outputs/Restyle.snplg`.
 
 ## Inspiration
 
-Lasso cleanup and selection styling were informed by [Charles Cheval’s Snap](https://github.com/CharlesCheval/supernote-snap) (reviewed commit `d0275ea17b8e34c9cd08d0a0e05856954401c33c`) and [Palette](https://github.com/CharlesCheval/supernote-palette) (`bb5a941aa95bf931a60e18ced3d55509975c3240`), both MIT licensed. The new geometry and recovery modules are implemented independently; no upstream code was copied. Their device reports are investigation leads, not confirmed Restyle behavior.
+Shape replacement follows [Charles Cheval’s Snap](https://github.com/CharlesCheval/supernote-snap) and the fills follow his [Palette](https://github.com/CharlesCheval/supernote-palette). Both are MIT licensed. Some of their code is copied unchanged into `src/vendor/`; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Credits
 

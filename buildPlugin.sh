@@ -733,7 +733,7 @@ main() {
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
     fi
 
-    cp "$project_root/src/vendor/supernote-snap/LICENSE" "$gen_dir/supernote-snap-LICENSE.txt" || return 1
+    cp "$project_root/src/vendor/snap/LICENSE" "$gen_dir/supernote-snap-LICENSE.txt" || return 1
     cp "$project_root/src/vendor/palette/LICENSE" "$gen_dir/supernote-palette-LICENSE.txt" || return 1
     cp "$project_root/THIRD_PARTY_NOTICES.md" "$gen_dir/THIRD_PARTY_NOTICES.md" || return 1
 

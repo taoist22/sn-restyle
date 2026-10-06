@@ -1,5 +1,3 @@
-// Legacy: restores a pending recovery record left by 0.6.x builds that used the old delete-and-verify cleanup.
-import {readCleanupRecord, recoverCleanup, forgetCleanup} from './src/cleanupOps';
 import {applySnapCleanup} from './src/snapCleanup';
 import {hasFill} from './src/fillShapes';
 import {insertFill, planFill} from './src/fillOps';
@@ -37,11 +35,6 @@ export default function App() {
   const runDetect = useCallback(async () => {
     invalidateOperations();
     const live = captureOperation();
-    try {
-      const cleanup = await readCleanupRecord();
-      live();
-      if (cleanup) {setScreen({kind: 'cleanupUndo', record: cleanup}); return;}
-    } catch (e) {setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Cannot read cleanup recovery.'}); return;}
     // If a snapshot is pending, verify it belongs to the current note before showing undo.
     // The PluginHost JS context survives note switches, so onStop may not fire between notes.
     if (pendingSnapshot && pendingSnapshotContext) {
@@ -144,17 +137,13 @@ export default function App() {
   );
 
   const handleUndo = useCallback(async () => {
-    if ((screen.kind !== 'undo' && screen.kind !== 'cleanupUndo') || busy) {return;}
+    if (screen.kind !== 'undo' || busy) {return;}
     const live = captureOperation();
     setBusy(true);
     setScreen({kind: 'working', message: 'Undoing…'});
     try {
       if (!await ensureFileWritePermission() || !await ensureFileReadPermission()) {throw new Error('File access is required for undo.');}
-      await runExclusive(async () => {
-        if (screen.kind === 'cleanupUndo') {await recoverCleanup(screen.record, live);} else {
-          await undoRestyle(screen.filePath, screen.pageNum, screen.snapshot, live);
-        }
-      });
+      await runExclusive(() => undoRestyle(screen.filePath, screen.pageNum, screen.snapshot, live));
       live();
       pendingSnapshot = null;
       pendingSnapshotContext = null;
@@ -169,10 +158,6 @@ export default function App() {
   const handleNewRestyle = useCallback(async () => {
     // Discard pending snapshot and run a fresh detect on the current lasso selection
     if (busy) {return;}
-    if (screen.kind === 'cleanupUndo') {
-      if (screen.record.phase !== 'committed') {setScreen({kind: 'error', message: 'Restore the drawing before starting another operation.'}); return;}
-      await forgetCleanup();
-    }
     invalidateOperations();
     const live = captureOperation();
     pendingSnapshot = null;
@@ -188,7 +173,7 @@ export default function App() {
     } catch (e) {
       setScreen({kind: 'error', message: selectionErrorMessage(e)});
     }
-  }, [screen, busy]);
+  }, [busy]);
 
   const handleSavePreset = useCallback(
     (index: number, preset: Preset) => {
@@ -254,25 +239,21 @@ export default function App() {
     );
   }
 
-  if (screen.kind === 'undo' || screen.kind === 'cleanupUndo') {
-    const count = screen.kind === 'undo' ? screen.snapshot.length : screen.record.originals.length;
-    const recovering = screen.kind === 'cleanupUndo' && screen.record.phase !== 'committed';
+  if (screen.kind === 'undo') {
+    const count = screen.snapshot.length;
     return (
       <View style={styles.centered}>
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>{recovering ? 'Restore drawing' : 'Last Restyle operation'}</Text>
+          <Text style={styles.infoTitle}>Last Restyle operation</Text>
           <Text style={styles.infoSubtitle}>
             {count} element{count !== 1 ? 's' : ''} changed
           </Text>
-          <Text style={styles.infoHint}>{screen.kind === 'cleanupUndo'
-            ? 'Restore original strokes on the original note page. Cleanup recovery survives restarting.'
-            : 'Undo last operation, regardless of the current selection. Available this session.'}</Text>
-          {screen.kind === 'cleanupUndo' && <Text style={styles.infoHint}>{`Original page: ${screen.record.pageNum + 1}`}</Text>}
+          <Text style={styles.infoHint}>Undo last operation, regardless of the current selection. Available this session.</Text>
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.undoButton} onPress={handleUndo} disabled={busy}>
-              <Text style={styles.undoText}>{recovering ? 'Restore drawing' : 'Undo last'}</Text>
+              <Text style={styles.undoText}>Undo last</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy || recovering}>
+            <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy}>
               <Text style={styles.applyText}>New Restyle</Text>
             </TouchableOpacity>
           </View>

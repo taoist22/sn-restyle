@@ -1,4 +1,4 @@
-// Verbatim copy of CharlesCheval/supernote-snap src/symbols.ts (MIT, see ../supernote-snap/LICENSE), fetched 2026-10-05.
+// Verbatim copy of CharlesCheval/supernote-snap src/symbols.ts (MIT, see LICENSE in this directory), fetched 2026-10-05.
 /**
  * Maths symbols recognized from a single open stroke: curly brace, square root,
  * and coordinate axes drawn as an "L". Pure logic, unit-tested.

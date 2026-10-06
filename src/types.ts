@@ -2,7 +2,6 @@ import type {ShapeChoice} from './snapRecognize';
 import type {FillChoice} from './fillShapes';
 import type {AxesSpec} from './axesBuild';
 import type {TargetIdentity} from './selectionSafety';
-import type {CleanupRecord} from './cleanupOps';
 export type PenColor = 'black' | 'darkGray' | 'lightGray' | 'ghost';
 
 export const PEN_COLOR_VALUES: Record<PenColor, number> = {
@@ -68,6 +67,5 @@ export type AppScreen =
   | {kind: 'detecting'}
   | {kind: 'panel'; info: LassoInfo}
   | {kind: 'undo'; snapshot: ElementSnapshot[]; filePath: string; pageNum: number}
-  | {kind: 'cleanupUndo'; record: CleanupRecord}
   | {kind: 'working'; message: string}
   | {kind: 'error'; message: string};
