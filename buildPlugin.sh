@@ -488,7 +488,7 @@ build_react_native_bundle() {
     write_color_output "Starting React Native bundling..." "Blue"
     local bundle_output="$output_dir/$project_name.bundle"
     local assets_dir="$output_dir"
-    local cmd="npx react-native bundle --entry-file index.js --bundle-output \"$bundle_output\" --platform android --assets-dest \"$assets_dir\" --dev false"
+    local cmd="npx react-native bundle --entry-file index.js --bundle-output \"$bundle_output\" --platform android --assets-dest \"$assets_dir\" --dev false --reset-cache"
     write_color_output "Executing command: $cmd" "Yellow"
     (cd "$project_root" && eval "$cmd") && write_color_output "Bundle generated: $bundle_output" "Green"
 }
@@ -732,6 +732,10 @@ main() {
     else
         write_color_output "Build conditions not met; skipping native build and reactPackages update" "Yellow"
     fi
+
+    cp "$project_root/src/vendor/supernote-snap/LICENSE" "$gen_dir/supernote-snap-LICENSE.txt" || return 1
+    cp "$project_root/src/vendor/palette/LICENSE" "$gen_dir/supernote-palette-LICENSE.txt" || return 1
+    cp "$project_root/THIRD_PARTY_NOTICES.md" "$gen_dir/THIRD_PARTY_NOTICES.md" || return 1
 
     local outputs_dir
     outputs_dir="$(ensure_build_outputs_directory "$project_root")"

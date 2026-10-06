@@ -1,7 +1,11 @@
+import {assertContext, assertSelection, assertUnmoved, exactTargets, identityOf, fingerprintElement} from './selectionSafety';
 import {Element, PluginCommAPI, PluginFileAPI, PluginManager, PluginNoteAPI} from 'sn-plugin-lib';
 import {PEN_COLOR_VALUES, THICKNESS_MIN, type ElementSnapshot, type LassoInfo, type RestyleOptions} from './types';
 
 type Res<T> = {success: boolean; result?: T; error?: {message?: string}} | null | undefined;
+export class StyleRecoveryError extends Error {
+  constructor(message: string, public snapshots: ElementSnapshot[]) {super(message); this.name = 'StyleRecoveryError';}
+}
 type Size  = {width: number; height: number};
 
 function errorMessage<T>(res: Res<T>, fallback: string): string {
@@ -10,15 +14,15 @@ function errorMessage<T>(res: Res<T>, fallback: string): string {
 
 async function saveCurrentNote(): Promise<void> {
   const res = (await PluginNoteAPI.saveCurrentNote()) as Res<boolean>;
-  if (!res?.success) {throw new Error(errorMessage(res, 'Could not save the current note'));}
+  if (!res?.success || res.result !== true) {throw new Error(errorMessage(res, 'Could not save the current note'));}
 }
 
 async function reloadCurrentFile(): Promise<void> {
   const res = (await PluginCommAPI.reloadFile()) as Res<boolean>;
-  if (!res?.success) {throw new Error(errorMessage(res, 'Could not reload the current note'));}
+  if (!res?.success || res.result !== true) {throw new Error(errorMessage(res, 'Could not reload the current note'));}
 }
 
-async function getContext(): Promise<{filePath: string; pageNum: number}> {
+export async function getContext(): Promise<{filePath: string; pageNum: number}> {
   const pathRes = (await PluginCommAPI.getCurrentFilePath()) as Res<string>;
   const pageRes = (await PluginCommAPI.getCurrentPageNum()) as Res<number>;
   if (!pathRes?.success || !pathRes.result) {throw new Error('Cannot read file path');}
@@ -43,7 +47,8 @@ async function getAllPageElements(pageNum: number, filePath: string): Promise<an
 
 async function getPageSize(filePath: string, pageNum: number): Promise<Size> {
   const res = (await (PluginFileAPI as any).getPageSize(filePath, pageNum)) as Res<Size>;
-  return res?.result ?? {width: 1404, height: 1872};
+  if (!res?.success || !res.result || res.result.width < 1 || res.result.height < 1) {throw new Error('Cannot verify page dimensions.');}
+  return res.result;
 }
 
 async function recycleAll(elements: any[]): Promise<void> {
@@ -75,7 +80,7 @@ async function detectCrossDevice(filePath: string, pageNum: number): Promise<boo
   try {
     const deviceType = await PluginManager.getDeviceType();
     const native = DEVICE_NATIVE[deviceType];
-    if (!native) {return false;} // unknown device — don't block
+    if (!native) {throw new Error('This device has not been verified for Restyle.');}
 
     // Do not compare getFileMachineType() and getDeviceType() directly. Some
     // firmware generations report different enum families for those calls.
@@ -84,19 +89,21 @@ async function detectCrossDevice(filePath: string, pageNum: number): Promise<boo
     const [cw, ch] = normSize(canvas.width, canvas.height);
     const [nw, nh] = normSize(native[0], native[1]);
     return cw !== nw || ch !== nh;
-  } catch {
-    return false; // can't determine — don't block
+  } catch (error) {
+    throw new Error(error instanceof Error ? error.message : 'Cannot verify the note device.');
   }
 }
 
 export async function getLassoInfo(): Promise<LassoInfo> {
   const ctx = await getContext();
+  await assertContext(ctx);
+  clearCacheSafely();
 
   const lassoRes = (await PluginCommAPI.getLassoElements()) as Res<any[]>;
   if (!lassoRes?.success) {throw new Error('Cannot read lasso elements');}
 
   const lassoElements: any[] = lassoRes.result ?? [];
-  const allReadElements: any[] = [...lassoElements];
+  const allReadElements = [...lassoElements];
 
   try {
     const strokes = lassoElements.filter(el => el?.type === Element.TYPE_STROKE);
@@ -105,6 +112,9 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     if (strokes.length === 0 && geos.length === 0) {
       throw new Error('No strokes or geometry in selection');
     }
+    // One shape is styled through the native lasso API, which needs no settled position.
+    // File-based paths read saved coordinates, so a moved selection must be committed first.
+    if (!(strokes.length === 0 && geos.length === 1 && lassoElements.length === 1)) {await assertUnmoved();}
 
     const elementNums = [...strokes, ...geos]
       .map(el => el?.numInPage)
@@ -129,8 +139,12 @@ export async function getLassoInfo(): Promise<LassoInfo> {
     // Cross-device note check (note canvas size vs this device's native size).
     const crossDevice = await detectCrossDevice(ctx.filePath, ctx.pageNum);
 
+    const identities = [];
+    for (const el of [...strokes, ...geos]) {identities.push({...identityOf(el), fingerprint: await fingerprintElement(el)});}
     return {
       ...ctx,
+      identities,
+      otherCount: lassoElements.length - strokes.length - geos.length,
       strokeCount:   strokes.length,
       geometryCount: geos.length,
       avgThickness,
@@ -141,38 +155,59 @@ export async function getLassoInfo(): Promise<LassoInfo> {
       crossDevice,
     };
   } finally {
+    // Preserve Restyle’s established leak-prevention behavior pending device tests.
     await recycleAll(allReadElements);
     clearCacheSafely();
   }
 }
 
-export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Promise<ElementSnapshot[]> {
+export async function applyRestyle(info: LassoInfo, options: RestyleOptions, live: () => void = () => {}): Promise<ElementSnapshot[]> {
   if (options.color === null && options.thickness === null) {return [];}
 
-  const {filePath, pageNum, elementNums} = info;
+  const {filePath, pageNum} = info;
+  if (info.crossDevice) {throw new Error('Restyle is disabled on cross-device notes.');}
+  if (info.hasMarkerStroke && options.thickness !== null) {throw new Error('Marker strokes support color changes only.');}
+  const singleShape = info.strokeCount === 0 && info.geometryCount === 1 && info.otherCount === 0;
+  await assertContext(info, live); if (!singleShape) {await assertUnmoved();} await assertSelection(info.identities);
+
+  // The lasso API changes one geometry without rewriting the page coordinates.
+  if (info.strokeCount === 0 && info.geometryCount === 1 && info.otherCount === 0) {
+    const res: any = await PluginCommAPI.getLassoGeometries();
+    if (!res?.success || res.result?.length !== 1) {throw new Error('Cannot read the selected geometry.');}
+    const geo = res.result[0], id = info.identities[0];
+    const before: ElementSnapshot = {uuid: id.uuid, layerNum: id.layerNum, numInPage: id.numInPage, type: id.type, fingerprint: id.fingerprint, originalPenColor: geo.penColor, originalPenWidth: geo.penWidth, originalThickness: null};
+    const next = {...geo, showLassoAfterInsert: true};
+    if (options.color !== null) {next.penColor = PEN_COLOR_VALUES[options.color];}
+    if (options.thickness !== null) {next.penWidth = Math.max(THICKNESS_MIN, options.thickness);}
+    await assertContext(info, live);
+    let written: any;
+    try {written = await PluginCommAPI.modifyLassoGeometry(next);}
+    catch (error) {throw new StyleRecoveryError(error instanceof Error ? error.message : 'Shape styling failed.', [before]);}
+    if (!written?.success || written.result !== true) {throw new StyleRecoveryError(errorMessage(written, 'Shape styling failed.'), [before]);}
+    // Follow Palette's single-shape path: the native boolean is authoritative.
+    // A second lasso read can be empty or stale after the host replaces its selection.
+    return [before];
+  }
 
   // Flush strokes to file, then CLEAR the lasso before reading/modifying.
   // modifyElements while a lasso is active corrupts stroke positions on notes
   // containing H (title) elements; reloadFile drops the lasso/floating state so
   // the write happens against clean coordinates. (Confirmed on-device 2026-06-04.)
+  await assertContext({filePath, pageNum}, live);
   await saveCurrentNote();
+  await assertContext({filePath, pageNum}, live);
   await reloadCurrentFile();
+  await assertContext({filePath, pageNum}, live);
   const allFileElements = await getAllPageElements(pageNum, filePath);
 
   try {
-    const targets = allFileElements.filter(
-      el => el?.numInPage != null &&
-            elementNums.includes(el.numInPage) &&
-            (el.type === Element.TYPE_STROKE || el.type === Element.TYPE_GEO),
-    );
-
-    if (targets.length === 0) {
-      // Lasso already cleared above; nothing further to do.
-      return [];
-    }
+    const targets = await exactTargets(allFileElements, info.identities);
 
     // Capture snapshot of original values before modifying — used for undo
     const snapshot: ElementSnapshot[] = targets.map(el => ({
+      uuid:              el.uuid,
+      layerNum:          el.layerNum,
+      fingerprint:       info.identities.find(id => id.numInPage === el.numInPage)?.fingerprint,
       numInPage:         el.numInPage,
       type:              el.type,
       originalPenColor:  el.type === Element.TYPE_STROKE ? (el.stroke?.penColor ?? null) : (el.geometry?.penColor ?? null),
@@ -192,11 +227,29 @@ export async function applyRestyle(info: LassoInfo, options: RestyleOptions): Pr
       }
     }
 
-    const modifyRes = (await PluginFileAPI.modifyElements(filePath, pageNum, targets)) as Res<number[]>;
-    if (!modifyRes?.success) {throw new Error(errorMessage(modifyRes, 'Restyle write failed'));}
-    // Reload to render the change.
-    await reloadCurrentFile();
-
+    await assertContext({filePath, pageNum}, live);
+    let modifyRes: Res<number[]>;
+    try {modifyRes = await PluginFileAPI.modifyElements(filePath, pageNum, targets) as Res<number[]>;}
+    catch (error) {throw new StyleRecoveryError(error instanceof Error ? error.message : 'The style write could not be verified.', snapshot);}
+    if (!modifyRes?.success || !Array.isArray(modifyRes.result) || !targets.every(e => modifyRes?.result?.includes(e.numInPage))) {
+      // Restore the whole captured style set if only a subset was written.
+      for (const el of targets) {
+        const before = snapshot.find(v => v.uuid === el.uuid)!;
+        if (el.stroke) {el.stroke.penColor = before.originalPenColor; el.thickness = before.originalThickness;}
+        if (el.geometry) {el.geometry.penColor = before.originalPenColor; el.geometry.penWidth = before.originalPenWidth;}
+      }
+      await assertContext({filePath, pageNum}, live);
+      const restored = await PluginFileAPI.modifyElements(filePath, pageNum, targets) as Res<number[]>;
+      await reloadCurrentFile();
+      throw new StyleRecoveryError(restored?.success && targets.every(e => restored.result?.includes(e.numInPage)) ? 'The style change was incomplete; original styles were restored.' : 'The style change was incomplete. Reopen Restyle to restore original styles.', snapshot);
+    }
+    // modifyElements already reported every target as written. Do not compare values
+    // read back: the firmware may re-encode width or shade, and a false mismatch would
+    // offer to undo a change that worked.
+    try {
+      await assertContext({filePath, pageNum}, live);
+      await reloadCurrentFile();
+    } catch (error) {throw new StyleRecoveryError(error instanceof Error ? error.message : 'Could not refresh the note after styling.', snapshot);}
     return snapshot;
   } finally {
     await recycleAll(allFileElements);
@@ -208,20 +261,25 @@ export async function undoRestyle(
   filePath: string,
   pageNum: number,
   snapshots: ElementSnapshot[],
+  live: () => void = () => {},
 ): Promise<void> {
   if (snapshots.length === 0) {return;}
   // Clear any active lasso before modifyElements (same H-element safety as
   // applyRestyle) — covers the case where the plugin was opened via the lasso
   // button while an undo was pending.
+  await assertContext({filePath, pageNum}, live);
   await saveCurrentNote();
+  await assertContext({filePath, pageNum}, live);
   await reloadCurrentFile();
+  await assertContext({filePath, pageNum}, live);
   const allElements = await getAllPageElements(pageNum, filePath);
 
   try {
-    const snapMap = new Map(snapshots.map(s => [s.numInPage, s]));
-    const targets = allElements.filter(el => el?.numInPage != null && snapMap.has(el.numInPage));
-    for (const el of targets) {
-      const snap = snapMap.get(el.numInPage)!;
+    const snapMap = new Map(snapshots.map(s => [s.uuid, s]));
+    const targets = await exactTargets(allElements, snapshots);
+    for (let i = 0; i < targets.length; i++) {
+      const el = targets[i];
+      const snap = snapMap.get(el.uuid) ?? snapshots[i];
       if (el.type === Element.TYPE_STROKE) {
         if (snap.originalPenColor  !== null && el.stroke)   {el.stroke.penColor = snap.originalPenColor;}
         if (snap.originalThickness !== null)                {el.thickness        = snap.originalThickness;}
@@ -231,8 +289,10 @@ export async function undoRestyle(
         if (snap.originalPenWidth !== null && el.geometry)  {el.geometry.penWidth = snap.originalPenWidth;}
       }
     }
+    await assertContext({filePath, pageNum}, live);
     const modifyRes = (await PluginFileAPI.modifyElements(filePath, pageNum, targets)) as Res<number[]>;
-    if (!modifyRes?.success) {throw new Error(errorMessage(modifyRes, 'Undo write failed'));}
+    if (!modifyRes?.success || !targets.every(e => modifyRes.result?.includes(e.numInPage))) {throw new Error(errorMessage(modifyRes, 'Undo was incomplete; keep the recovery record and retry.'));}
+    await assertContext({filePath, pageNum}, live);
     await reloadCurrentFile();
   } finally {
     await recycleAll(allElements);

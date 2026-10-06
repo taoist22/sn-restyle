@@ -1,9 +1,15 @@
+// Legacy: restores a pending recovery record left by 0.6.x builds that used the old delete-and-verify cleanup.
+import {readCleanupRecord, recoverCleanup, forgetCleanup} from './src/cleanupOps';
+import {applySnapCleanup} from './src/snapCleanup';
+import {hasFill} from './src/fillShapes';
+import {insertFill, planFill} from './src/fillOps';
+import {captureOperation, invalidateOperations, runExclusive} from './src/operationSession';
 import React, {useCallback, useEffect, useState} from 'react';
 import {ActivityIndicator, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {PluginCommAPI, PluginManager} from 'sn-plugin-lib';
 import {getLastButtonEvent, installPluginRouter, subscribeToButtonEvents} from './src/pluginRouter';
 import RestylePanel from './src/RestylePanel';
-import {applyRestyle, getLassoInfo, undoRestyle} from './src/restyleOps';
+import {applyRestyle, getLassoInfo, undoRestyle, StyleRecoveryError} from './src/restyleOps';
 import {loadPresets, savePresets} from './src/storage';
 import {ensureFileReadPermission, ensureFileWritePermission} from './src/pluginPermissions';
 import type {AppScreen, ElementSnapshot, LassoInfo, Preset, RestyleOptions} from './src/types';
@@ -29,6 +35,13 @@ export default function App() {
   const [presets, setPresets] = useState<(Preset | null)[]>([null, null, null, null]);
 
   const runDetect = useCallback(async () => {
+    invalidateOperations();
+    const live = captureOperation();
+    try {
+      const cleanup = await readCleanupRecord();
+      live();
+      if (cleanup) {setScreen({kind: 'cleanupUndo', record: cleanup}); return;}
+    } catch (e) {setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Cannot read cleanup recovery.'}); return;}
     // If a snapshot is pending, verify it belongs to the current note before showing undo.
     // The PluginHost JS context survives note switches, so onStop may not fire between notes.
     if (pendingSnapshot && pendingSnapshotContext) {
@@ -49,6 +62,7 @@ export default function App() {
         throw new Error('File read permission is required. Reopen Restyle and allow access when prompted.');
       }
       const info = await getLassoInfo();
+      live();
       setScreen({kind: 'panel', info});
     } catch (e) {
       setScreen({kind: 'error', message: selectionErrorMessage(e)});
@@ -73,6 +87,7 @@ export default function App() {
         if (state === 2) {
           loadPresets().then(setPresets);
         } else if (state === 3 || state === 4 || state === 5) {
+          invalidateOperations();
           pendingSnapshot = null;
           pendingSnapshotContext = null;
           setScreen({kind: 'detecting'});
@@ -91,20 +106,35 @@ export default function App() {
     async (options: RestyleOptions) => {
       if (screen.kind !== 'panel' || busy) {return;}
       const info: LassoInfo = screen.info;
+      const live = captureOperation();
       setBusy(true);
       setScreen({kind: 'working', message: 'Applying…'});
       try {
         if (!await ensureFileWritePermission()) {
           throw new Error('File write permission is required. Reopen Restyle and allow access when prompted.');
         }
-        const snapshot = await applyRestyle(info, options);
-        if (snapshot.length > 0) {
+        if (options.shape && options.shape !== 'keep') {
+          // Snap's flow: one stroke, no staleness guard mid-operation, no journal.
+          await runExclusive(() => applySnapCleanup(info, options));
+          pendingSnapshot = null; pendingSnapshotContext = null;
+          PluginManager.closePluginView();
+          return;
+        }
+        await runExclusive(async () => {
+          // Fill is planned before any restyle (it needs the shape as it is now) and inserted after it.
+          const fill = hasFill(options) ? await planFill(info, options) : null;
+          const snapshot = options.color === null && options.thickness === null ? [] : await applyRestyle(info, options, live);
+          if (fill) {await insertFill(fill);}
+          if (snapshot.length > 0) {
           // Store snapshot so user can undo on next open
           pendingSnapshot = snapshot;
           pendingSnapshotContext = {filePath: info.filePath, pageNum: info.pageNum};
-        }
+          }
+        });
+        live();
         PluginManager.closePluginView();
       } catch (e) {
+        if (e instanceof StyleRecoveryError) {pendingSnapshot = e.snapshots; pendingSnapshotContext = {filePath: info.filePath, pageNum: info.pageNum};}
         setScreen({kind: 'error', message: e instanceof Error ? e.message : 'Apply failed'});
       } finally {
         setBusy(false);
@@ -114,12 +144,18 @@ export default function App() {
   );
 
   const handleUndo = useCallback(async () => {
-    if (screen.kind !== 'undo' || busy) {return;}
-    const {snapshot, filePath, pageNum} = screen;
+    if ((screen.kind !== 'undo' && screen.kind !== 'cleanupUndo') || busy) {return;}
+    const live = captureOperation();
     setBusy(true);
     setScreen({kind: 'working', message: 'Undoing…'});
     try {
-      await undoRestyle(filePath, pageNum, snapshot);
+      if (!await ensureFileWritePermission() || !await ensureFileReadPermission()) {throw new Error('File access is required for undo.');}
+      await runExclusive(async () => {
+        if (screen.kind === 'cleanupUndo') {await recoverCleanup(screen.record, live);} else {
+          await undoRestyle(screen.filePath, screen.pageNum, screen.snapshot, live);
+        }
+      });
+      live();
       pendingSnapshot = null;
       pendingSnapshotContext = null;
       PluginManager.closePluginView();
@@ -132,6 +168,13 @@ export default function App() {
 
   const handleNewRestyle = useCallback(async () => {
     // Discard pending snapshot and run a fresh detect on the current lasso selection
+    if (busy) {return;}
+    if (screen.kind === 'cleanupUndo') {
+      if (screen.record.phase !== 'committed') {setScreen({kind: 'error', message: 'Restore the drawing before starting another operation.'}); return;}
+      await forgetCleanup();
+    }
+    invalidateOperations();
+    const live = captureOperation();
     pendingSnapshot = null;
     pendingSnapshotContext = null;
     setScreen({kind: 'detecting'});
@@ -140,11 +183,12 @@ export default function App() {
         throw new Error('File read permission is required. Reopen Restyle and allow access when prompted.');
       }
       const info = await getLassoInfo();
+      live();
       setScreen({kind: 'panel', info});
     } catch (e) {
       setScreen({kind: 'error', message: selectionErrorMessage(e)});
     }
-  }, []);
+  }, [screen, busy]);
 
   const handleSavePreset = useCallback(
     (index: number, preset: Preset) => {
@@ -165,6 +209,7 @@ export default function App() {
   );
 
   const handleCancel = useCallback(() => {
+    invalidateOperations();
     PluginManager.closePluginView();
   }, []);
 
@@ -198,29 +243,42 @@ export default function App() {
         <View style={styles.errorCard}>
           <Text style={styles.errorTitle}>Could not process selection</Text>
           <Text style={styles.errorMessage}>{screen.message}</Text>
+          <TouchableOpacity style={[styles.undoButton, styles.retryButton]} onPress={runDetect} disabled={busy}>
+            <Text style={styles.undoText}>Retry / Recovery</Text>
+          </TouchableOpacity>
+          <TouchableOpacity style={styles.cancelButton} onPress={handleCancel} disabled={busy}>
+            <Text style={styles.cancelText}>Close</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
   }
 
-  if (screen.kind === 'undo') {
-    const count = screen.snapshot.length;
+  if (screen.kind === 'undo' || screen.kind === 'cleanupUndo') {
+    const count = screen.kind === 'undo' ? screen.snapshot.length : screen.record.originals.length;
+    const recovering = screen.kind === 'cleanupUndo' && screen.record.phase !== 'committed';
     return (
       <View style={styles.centered}>
         <View style={styles.infoCard}>
-          <Text style={styles.infoTitle}>Restyle applied</Text>
+          <Text style={styles.infoTitle}>{recovering ? 'Restore drawing' : 'Last Restyle operation'}</Text>
           <Text style={styles.infoSubtitle}>
             {count} element{count !== 1 ? 's' : ''} changed
           </Text>
-          <Text style={styles.infoHint}>Undo is only available this session.</Text>
+          <Text style={styles.infoHint}>{screen.kind === 'cleanupUndo'
+            ? 'Restore original strokes on the original note page. Cleanup recovery survives restarting.'
+            : 'Undo last operation, regardless of the current selection. Available this session.'}</Text>
+          {screen.kind === 'cleanupUndo' && <Text style={styles.infoHint}>{`Original page: ${screen.record.pageNum + 1}`}</Text>}
           <View style={styles.actionRow}>
             <TouchableOpacity style={styles.undoButton} onPress={handleUndo} disabled={busy}>
-              <Text style={styles.undoText}>Undo last</Text>
+              <Text style={styles.undoText}>{recovering ? 'Restore drawing' : 'Undo last'}</Text>
             </TouchableOpacity>
-            <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy}>
+            <TouchableOpacity style={styles.applyButton} onPress={handleNewRestyle} disabled={busy || recovering}>
               <Text style={styles.applyText}>New Restyle</Text>
             </TouchableOpacity>
           </View>
+          <TouchableOpacity style={styles.cancelButton} onPress={handleCancel} disabled={busy}>
+            <Text style={styles.cancelText}>Close</Text>
+          </TouchableOpacity>
         </View>
       </View>
     );
@@ -324,6 +382,7 @@ const styles = StyleSheet.create({
     borderColor: '#000000',
     alignItems: 'center',
   },
+  retryButton: {flex: 0, paddingHorizontal: 24},
   undoText: {fontSize: 16, fontWeight: '600', color: '#000000'},
   applyButton: {
     flex: 1,

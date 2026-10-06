@@ -8,6 +8,24 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 
 > **Pre-release:** This plugin requires the Supernote beta firmware and is not yet intended for general use.
 
+## Shapes, fills and axes (0.6.x-beta)
+
+Lasso **one stroke**, open Restyle and use the **Shape** tab. Pick **Auto** or a named shape and tap **Apply**; the stroke is replaced by a clean native shape. **Keep drawing** (the default) does no recognition and leaves ordinary restyling unchanged. Nothing runs in the background while you write.
+
+- **Shapes:** line, rectangle, circle, arrow, axes. **Flowchart:** diamond, rounded box, parallelogram, triangle, elbow arrow.
+- **Auto** recognizes arrows, a drawn L (as axes), lines, circles, rectangles, triangles and diamonds. A **named shape** always fits that shape, even from a rough stroke. Parallelogram, rounded box and elbow arrow are button-only.
+- **Outline width** (on the Shape tab) has pen-size steps and Wide 2×–12× multipliers, taken from the stroke's own width.
+- **Fill:** none, light gray, dark gray or white, for circles, rectangles and the polygon shapes. White hides the page's template lines. The fill is a separate element inside the outline, so lasso both to move them. Choose a fill with a new shape, or lasso an existing circle or rectangle and choose a fill alone.
+- **Axes:** set x from/to, y from/to (each range must include 0) and the tick step (1, 2 or 5); optional arrowheads at the + ends or both ends. Size is automatic, centred on the lassoed stroke. Ticks only; write your own labels as text boxes.
+- **Arrows** are two pieces: the outline, and a separate head fill. Lasso both to move one.
+- The recognizer is Restyle's own (`src/shapeFit.ts`). The replace flow follows Charles Cheval's Snap (delete the stroke, insert the shape, restore the stroke if insertion fails), and the fill method follows his Palette. Both are MIT; see `THIRD_PARTY_NOTICES.md`.
+
+The panel has a **Shape** tab and a **Style** tab with Apply and Cancel always visible. Shapes need exactly one stroke selected. Single native shapes use the lasso geometry styling API; multi-element styling keeps the title-safe save/reload/file-write sequence.
+
+Not built: dashed and dotted lines, filling hand-drawn strokes, multi-stroke shapes, panel controls for the elbow's legs. Shape cleanup is not covered by Restyle's undo; use Supernote's own undo or delete the pieces. An older recovery record from 0.6.0–0.6.6 builds can still be restored from the panel.
+
+See [TEST_MATRIX.md](TEST_MATRIX.md) for the on-device checks.
+
 ## Features
 
 - **Four ink colors** — Black, Dark Gray, Light Gray, and Ghost (white / invisible on white paper)
@@ -15,8 +33,9 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 - **Fine size adjustment** — move in 0.1 mm steps, including useful in-between sizes such as 1.1, 1.2, 1.3, and 1.4 mm (not available for marker strokes — see Limitations)
 - **Wide Shape** — enlarge straight-line and other geometry widths by a clear relative multiplier, separately from pen sizing
 - **Works on strokes and geometry** — lasso freehand handwriting, drawn shapes, or a mix of both
+- **Clean shapes, fills and axes** — turn one rough stroke into a native shape; gray or white fill; configurable axes
 - **Four user-defined presets** — save your favorite color + thickness combinations for one-tap access
-- **In-session undo** — revert your last restyle without leaving the note
+- **Undo last operation** — style undo within the session; cleanup includes a durable original-stroke recovery record
 - **Non-destructive** — elements stay exactly where they are; only color and thickness change
 - **Works on Nomad and Manta**
 
@@ -48,9 +67,9 @@ Presets let you save up to four color + thickness combinations for quick access.
 
 Presets are saved permanently and survive closing and reopening the app.
 
-## Undo
+## Style-only undo
 
-After you apply a restyle, the next time you open the Restyle panel in the same session it will show the **Undo** screen instead of the restyle controls.
+Cleanup uses the separate recovery workflow described above. After you apply a style-only restyle, the next time you open the Restyle panel in the same session it will show the **Undo** screen instead of the restyle controls.
 
 - Tap **Undo** to revert the most recent restyle. All elements that were changed in that operation are restored to their original color and thickness together.
 - Tap **New Restyle** to keep the most recent restyle and apply a fresh one to your current selection.
@@ -110,6 +129,10 @@ npm run validate:package -- --native
 ```
 
 The plugin file will be generated at `build/outputs/Restyle.snplg`.
+
+## Inspiration
+
+Lasso cleanup and selection styling were informed by [Charles Cheval’s Snap](https://github.com/CharlesCheval/supernote-snap) (reviewed commit `d0275ea17b8e34c9cd08d0a0e05856954401c33c`) and [Palette](https://github.com/CharlesCheval/supernote-palette) (`bb5a941aa95bf931a60e18ced3d55509975c3240`), both MIT licensed. The new geometry and recovery modules are implemented independently; no upstream code was copied. Their device reports are investigation leads, not confirmed Restyle behavior.
 
 ## Credits
 

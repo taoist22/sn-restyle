@@ -1,4 +1,7 @@
-import React, {useState} from 'react';
+import {SHAPE_CHOICES, type ShapeChoice} from './snapRecognize';
+import {FILL_LABELS, type FillChoice} from './fillShapes';
+import {AXES_LIMITS, DEFAULT_AXES, validateAxes, type AxesSpec, type AxisArrows} from './axesBuild';
+import React, {useRef, useState} from 'react';
 import {ScrollView, StyleSheet, Text, TouchableOpacity, View} from 'react-native';
 import {
   FINE_STEP_MM,
@@ -53,6 +56,32 @@ export default function RestylePanel({
   onCancel,
   busy,
 }: Props) {
+  const [shape, setShape] = useState<ShapeChoice>('keep');
+  const shapeRef = useRef<ShapeChoice>('keep');
+  const [fill, setFill] = useState<FillChoice>('none');
+  const [axes, setAxes] = useState<AxesSpec>(DEFAULT_AXES);
+  // Open on the Shape tab when one stroke or one circle/rectangle is selected: the cases where shapes and fill apply.
+  const shapeSelection = (info.strokeCount === 1 && info.geometryCount === 0 && info.otherCount === 0) || (info.strokeCount === 0 && info.geometryCount === 1 && info.otherCount === 0);
+  const [tab, setTab] = useState<'shape' | 'style'>(shapeSelection ? 'shape' : 'style');
+  const changeAxes = (key: 'xMin' | 'xMax' | 'yMin' | 'yMax', delta: number) =>
+    setAxes(a => {
+      const next = a[key] + delta;
+      // Lows stay at or below 0 and highs at or above 0: the axes cross at the origin.
+      const ok = key.endsWith('Min') ? next >= AXES_LIMITS.min && next <= 0 : next >= 0 && next <= AXES_LIMITS.max;
+      return ok ? {...a, [key]: next} : a;
+    });
+  const changeStep = (delta: number) =>
+    setAxes(a => {
+      const index = AXES_LIMITS.steps.indexOf(a.step) + delta;
+      return index >= 0 && index < AXES_LIMITS.steps.length ? {...a, step: AXES_LIMITS.steps[index]} : a;
+    });
+  const axisRows: {label: string; value: number; onMinus: () => void; onPlus: () => void}[] = [
+    {label: 'x from', value: axes.xMin, onMinus: () => changeAxes('xMin', -1), onPlus: () => changeAxes('xMin', 1)},
+    {label: 'x to', value: axes.xMax, onMinus: () => changeAxes('xMax', -1), onPlus: () => changeAxes('xMax', 1)},
+    {label: 'y from', value: axes.yMin, onMinus: () => changeAxes('yMin', -1), onPlus: () => changeAxes('yMin', 1)},
+    {label: 'y to', value: axes.yMax, onMinus: () => changeAxes('yMax', -1), onPlus: () => changeAxes('yMax', 1)},
+    {label: 'Tick every', value: axes.step, onMinus: () => changeStep(-1), onPlus: () => changeStep(1)},
+  ];
   const [selectedColor, setSelectedColor] = useState<PenColor | null>(null);
   const [selectedThickness, setSelectedThickness] = useState(info.avgThickness);
   const [thicknessChanged, setThicknessChanged] = useState(false);
@@ -87,7 +116,8 @@ export default function RestylePanel({
   }
 
   function handleWideShape(multiplier: number) {
-    setSelectedThickness(wideShapeWidth(info.avgGeometryWidth, multiplier));
+    // A shape is widened from its own width; a stroke about to become a shape, from the stroke's.
+    setSelectedThickness(wideShapeWidth(geometryOnly ? info.avgGeometryWidth : info.avgThickness, multiplier));
     setThicknessChanged(true);
     setSizeMode('wideShape');
     setWideMultiplier(multiplier);
@@ -107,15 +137,138 @@ export default function RestylePanel({
     setActivePreset(index);
   }
 
-  const canApply = selectedColor !== null || thicknessChanged;
+  const axesProblem = shape === 'axes' ? validateAxes(axes) : null;
+  const canApply = (selectedColor !== null || thicknessChanged || shape !== 'keep' || fill !== 'none') && !axesProblem;
+  const cleanupEligible = info.strokeCount === 1 && info.geometryCount === 0 && info.otherCount === 0;
+  const loneShape = info.strokeCount === 0 && info.geometryCount === 1 && info.otherCount === 0;
+  const fillEligible = loneShape || (cleanupEligible && ['auto', 'rectangle', 'circle', 'triangle', 'diamond', 'parallelogram', 'roundedRect'].includes(shape));
   const canSave = selectedColor !== null;
 
-  return (
-    <ScrollView contentContainerStyle={styles.container} keyboardShouldPersistTaps="handled">
-      <View style={styles.card}>
-        <Text allowFontScaling={false} style={styles.title}>Restyle</Text>
-        <Text allowFontScaling={false} style={styles.subtitle}>{selectionLabel}</Text>
+  const summary = [
+    shape !== 'keep' ? SHAPE_CHOICES.find(choice => choice.value === shape)?.label : null,
+    fillEligible && fill !== 'none' ? `${FILL_LABELS[fill]} fill` : null,
+    selectedColor !== null ? PEN_COLOR_LABELS[selectedColor] : null,
+    thicknessChanged ? `${selectedMillimetres.toFixed(1)} mm` : null,
+  ].filter(Boolean).join(' · ');
 
+  return (
+    <View style={styles.root}>
+      <View style={styles.card}>
+        <Text allowFontScaling={false} style={styles.title}>Restyle 0.6.7-beta</Text>
+        <Text allowFontScaling={false} style={styles.subtitle}>{selectionLabel}</Text>
+        <View style={styles.tabRow}>
+          {([['shape', 'Shape'], ['style', 'Style']] as ['shape' | 'style', string][]).map(([value, label]) => (
+            <TouchableOpacity key={value} testID={`tab-${value}`} style={[styles.tab, tab === value && styles.tabSelected]} onPress={() => setTab(value)}>
+              <Text allowFontScaling={false} style={[styles.tabText, tab === value && styles.tabTextSelected]}>{label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <ScrollView style={styles.body} contentContainerStyle={styles.bodyContent} keyboardShouldPersistTaps="handled">
+          {tab === 'shape' && (
+            <View style={styles.tabPage}>
+        <Text allowFontScaling={false} style={styles.sectionLabel}>Shape</Text>
+        <View style={styles.nativeSizeGrid}>
+          {SHAPE_CHOICES.filter(choice => choice.group === 'basic').map(choice => (
+            <TouchableOpacity key={choice.value} testID={`shape-${choice.value}`}
+              style={[styles.shapeChip, shape === choice.value && styles.sizeChipSelected]}
+              onPress={() => {shapeRef.current = choice.value; setShape(choice.value);}}
+              disabled={busy || (choice.value !== 'keep' && !cleanupEligible)}>
+              <Text allowFontScaling={false} style={[styles.sizeChipText, shape === choice.value && styles.activeText]}>{choice.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text allowFontScaling={false} style={styles.sectionLabel}>Flowchart</Text>
+        <View style={styles.nativeSizeGrid}>
+          {SHAPE_CHOICES.filter(choice => choice.group === 'flow').map(choice => (
+            <TouchableOpacity key={choice.value} testID={`shape-${choice.value}`}
+              style={[styles.shapeChip, shape === choice.value && styles.sizeChipSelected]}
+              onPress={() => {shapeRef.current = choice.value; setShape(choice.value);}}
+              disabled={busy || (choice.value !== 'keep' && !cleanupEligible)}>
+              <Text allowFontScaling={false} style={[styles.sizeChipText, shape === choice.value && styles.activeText]}>{choice.label}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text allowFontScaling={false} style={styles.sizeHint}>
+          {cleanupEligible ? 'Turns one lassoed stroke into a clean shape.' : 'Shapes need exactly one stroke selected.'}
+        </Text>
+        {shape === 'axes' && (
+          <View style={styles.axesBlock}>
+            <Text allowFontScaling={false} style={styles.sectionLabel}>Axes</Text>
+            {axisRows.map(row => (
+              <View key={row.label} style={styles.axesRow}>
+                <Text allowFontScaling={false} style={styles.axesLabel}>{row.label}</Text>
+                <TouchableOpacity testID={`axes-${row.label}-minus`} style={styles.stepButton} onPress={row.onMinus} disabled={busy}>
+                  <Text allowFontScaling={false} style={styles.stepButtonText}>−</Text>
+                </TouchableOpacity>
+                <Text allowFontScaling={false} style={styles.axesValue}>{row.value}</Text>
+                <TouchableOpacity testID={`axes-${row.label}-plus`} style={styles.stepButton} onPress={row.onPlus} disabled={busy}>
+                  <Text allowFontScaling={false} style={styles.stepButtonText}>+</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
+            <View style={styles.nativeSizeGrid}>
+              {([['none', 'No arrowheads'], ['positive', 'Arrow at + ends'], ['both', 'Arrows at both ends']] as [AxisArrows, string][]).map(([value, label]) => (
+                <TouchableOpacity key={value} testID={`axes-arrows-${value}`}
+                  style={[styles.shapeChip, axes.arrows === value && styles.sizeChipSelected]}
+                  onPress={() => setAxes(a => ({...a, arrows: value}))} disabled={busy}>
+                  <Text allowFontScaling={false} style={[styles.sizeChipText, axes.arrows === value && styles.activeText]}>{label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+            <Text allowFontScaling={false} style={styles.sizeHint}>{axesProblem ? 'Raise "to" and lower "from" until each axis has a range.' : 'Centred on the lassoed stroke and sized to fit the page. Write your own labels as text boxes.'}</Text>
+          </View>
+        )}
+        {shapeSelection && (
+          <View style={styles.wideSection}>
+            <Text allowFontScaling={false} style={styles.wideTitle}>Outline width</Text>
+            <View style={styles.fineSizeRow}>
+              <TouchableOpacity testID="shape-width-minus" style={styles.stepButton} onPress={() => handleStep(-1)} disabled={busy}>
+                <Text allowFontScaling={false} style={styles.stepButtonText}>−</Text>
+              </TouchableOpacity>
+              <View style={[styles.sizeReadout, thicknessChanged && styles.sizeReadoutChanged]}>
+                <Text allowFontScaling={false} style={styles.sizeReadoutValue}>
+                  {sizeMode === 'wideShape' && wideMultiplier ? `Wide ${wideMultiplier}×` : `${selectedMillimetres.toFixed(1)} mm`}
+                </Text>
+              </View>
+              <TouchableOpacity testID="shape-width-plus" style={styles.stepButton} onPress={() => handleStep(1)} disabled={busy}>
+                <Text allowFontScaling={false} style={styles.stepButtonText}>+</Text>
+              </TouchableOpacity>
+            </View>
+            <View style={styles.wideRow}>
+              {WIDE_SHAPE_MULTIPLIERS.map(multiplier => {
+                const isSelected = sizeMode === 'wideShape' && wideMultiplier === multiplier;
+                return (
+                  <TouchableOpacity key={multiplier} testID={`shape-wide-${multiplier}`}
+                    style={[styles.wideButton, isSelected && styles.sizeChipSelected]}
+                    onPress={() => handleWideShape(multiplier)} disabled={busy}>
+                    <Text allowFontScaling={false} style={[styles.wideButtonText, isSelected && styles.activeText]}>{multiplier}×</Text>
+                  </TouchableOpacity>
+                );
+              })}
+            </View>
+            <Text allowFontScaling={false} style={styles.wideDescription}>
+              Wide multiplies the current width, up to 12× (the tested maximum). A wide outline also covers any seam against a fill.
+            </Text>
+          </View>
+        )}
+        <Text allowFontScaling={false} style={styles.sectionLabel}>Fill</Text>
+        <View style={styles.nativeSizeGrid}>
+          {(['none', 'light', 'dark', 'white'] as FillChoice[]).map(choice => (
+            <TouchableOpacity key={choice} testID={`fill-${choice}`}
+              style={[styles.shapeChip, fill === choice && styles.sizeChipSelected]}
+              onPress={() => setFill(choice)}
+              disabled={busy || (choice !== 'none' && !fillEligible)}>
+              <Text allowFontScaling={false} style={[styles.sizeChipText, fill === choice && styles.activeText]}>{FILL_LABELS[choice]}</Text>
+            </TouchableOpacity>
+          ))}
+        </View>
+        <Text allowFontScaling={false} style={styles.sizeHint}>
+          {fillEligible ? 'Fill inside a circle or rectangle. White hides the page lines. The fill is separate: lasso both to move them.' : 'Fill needs one circle or rectangle, or a stroke with Auto, Rectangle or Circle.'}
+        </Text>
+            </View>
+          )}
+          {tab === 'style' && (
+            <View style={styles.tabPage}>
         <Text allowFontScaling={false} style={styles.sectionLabel}>Presets</Text>
         <View style={styles.presetsColumn}>
           {presets.map((preset, index) => {
@@ -292,44 +445,61 @@ export default function RestylePanel({
           </Text>
         )}
 
+        <TouchableOpacity style={styles.cancelButton} disabled={busy} onPress={() => {
+          setSelectedColor(null); setSelectedThickness(info.avgThickness); setThicknessChanged(false);
+          setSizeMode('pen'); setWideMultiplier(null); setActivePreset(null);
+        }}>
+          <Text allowFontScaling={false} style={styles.cancelText}>Keep original appearance</Text>
+        </TouchableOpacity>
+            </View>
+          )}
+        </ScrollView>
+        <Text allowFontScaling={false} style={styles.summary}>{summary || 'Nothing chosen yet'}</Text>
         <View style={styles.actionRow}>
           <TouchableOpacity style={styles.cancelButton} onPress={onCancel} disabled={busy}>
             <Text allowFontScaling={false} style={styles.cancelText}>Cancel</Text>
           </TouchableOpacity>
           <TouchableOpacity
+            testID="restyle-apply"
             style={[styles.applyButton, !canApply && styles.applyButtonDisabled]}
             onPress={() => onApply({
+              shape: shapeRef.current,
+              fill: fillEligible ? fill : 'none',
+              axes: shape === 'axes' ? axes : undefined,
               color: selectedColor,
               thickness: thicknessChanged ? selectedThickness : null,
             })}
             disabled={busy || !canApply}>
-            <Text allowFontScaling={false} style={[styles.applyText, !canApply && styles.applyTextDisabled]}>Apply</Text>
+            <Text allowFontScaling={false} style={[styles.applyText, !canApply && styles.applyTextDisabled]}>{shape === 'keep' ? 'Apply' : `Apply ${SHAPE_CHOICES.find(choice => choice.value === shape)?.label}`}</Text>
           </TouchableOpacity>
         </View>
       </View>
-    </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  container: {
-    flexGrow: 1,
-    alignItems: 'center',
-    justifyContent: 'flex-start',
-    paddingTop: 24,
-    paddingBottom: 24,
-    backgroundColor: 'transparent',
-  },
+  root: {flex: 1, alignItems: 'center', paddingVertical: 24, backgroundColor: 'transparent'},
   card: {
+    flex: 1,
     width: '92%',
     maxWidth: 500,
     backgroundColor: '#FFFFFF',
     borderRadius: 12,
     borderWidth: 1.5,
     borderColor: '#000000',
-    padding: 24,
-    gap: 14,
+    padding: 20,
+    gap: 12,
   },
+  tabRow: {flexDirection: 'row', gap: 8},
+  tab: {flex: 1, minHeight: 44, borderWidth: 1.5, borderColor: '#000000', borderRadius: 8, alignItems: 'center', justifyContent: 'center', backgroundColor: '#FFFFFF'},
+  tabSelected: {backgroundColor: '#000000'},
+  tabText: {fontSize: 16, fontWeight: '700', color: '#000000'},
+  tabTextSelected: {color: '#FFFFFF'},
+  body: {flex: 1},
+  bodyContent: {paddingBottom: 8},
+  tabPage: {gap: 14},
+  summary: {fontSize: 13, color: '#333333', textAlign: 'center'},
   title: {fontSize: 20, fontWeight: '700', color: '#000000', textAlign: 'center'},
   subtitle: {fontSize: 13, color: '#666666', textAlign: 'center', marginTop: -8},
   sectionLabel: {
@@ -392,6 +562,7 @@ const styles = StyleSheet.create({
   colorLabel: {fontSize: 11, color: '#555555', textAlign: 'center'},
   selectedText: {color: '#000000', fontWeight: '600'},
   nativeSizeGrid: {flexDirection: 'row', flexWrap: 'wrap', gap: 8},
+  shapeChip: {paddingHorizontal: 12, minHeight: 40, borderWidth: 1.5, borderColor: '#BBBBBB', borderRadius: 8, justifyContent: 'center', backgroundColor: '#FFFFFF'},
   sizeChip: {
     width: 66,
     height: 40,
@@ -405,6 +576,10 @@ const styles = StyleSheet.create({
   sizeChipSelected: {backgroundColor: '#000000', borderColor: '#000000'},
   sizeChipText: {fontSize: 14, fontWeight: '600', color: '#000000'},
   sizeHint: {fontSize: 11, color: '#777777', marginTop: -8},
+  axesBlock: {gap: 10},
+  axesRow: {flexDirection: 'row', alignItems: 'center', gap: 12},
+  axesLabel: {width: 96, fontSize: 15, fontWeight: '600', color: '#000000'},
+  axesValue: {width: 52, textAlign: 'center', fontSize: 20, fontWeight: '700', color: '#000000'},
   fineSizeRow: {flexDirection: 'row', alignItems: 'center', justifyContent: 'center', gap: 12},
   stepButton: {
     width: 46,

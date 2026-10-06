@@ -1,3 +1,8 @@
+import type {ShapeChoice} from './snapRecognize';
+import type {FillChoice} from './fillShapes';
+import type {AxesSpec} from './axesBuild';
+import type {TargetIdentity} from './selectionSafety';
+import type {CleanupRecord} from './cleanupOps';
 export type PenColor = 'black' | 'darkGray' | 'lightGray' | 'ghost';
 
 export const PEN_COLOR_VALUES: Record<PenColor, number> = {
@@ -21,6 +26,8 @@ export type SizeMode = 'pen' | 'wideShape';
 export interface LassoInfo {
   filePath: string;
   pageNum: number;
+  otherCount: number;
+  identities: TargetIdentity[];
   strokeCount: number;
   geometryCount: number;
   avgThickness: number;      // raw SDK width across the editable selection
@@ -32,6 +39,9 @@ export interface LassoInfo {
 }
 
 export interface ElementSnapshot {
+  uuid: string;
+  fingerprint?: string;
+  layerNum: number;
   numInPage: number;
   type: number;
   originalPenColor: number | null;
@@ -47,6 +57,9 @@ export interface Preset {
 }
 
 export interface RestyleOptions {
+  shape?: ShapeChoice;
+  axes?: AxesSpec;           // range, tick step and arrowheads for the Axes shape
+  fill?: FillChoice;         // gray fill inside a circle or rectangle
   color: PenColor | null;    // null = no color change
   thickness: number | null;  // null = no thickness change; raw SDK value
 }
@@ -55,5 +68,6 @@ export type AppScreen =
   | {kind: 'detecting'}
   | {kind: 'panel'; info: LassoInfo}
   | {kind: 'undo'; snapshot: ElementSnapshot[]; filePath: string; pageNum: number}
+  | {kind: 'cleanupUndo'; record: CleanupRecord}
   | {kind: 'working'; message: string}
   | {kind: 'error'; message: string};
