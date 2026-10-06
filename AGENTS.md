@@ -2,12 +2,12 @@
 
 ## Read these at the start of every session, in this order
 
-1. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/MEMORY.md` — index of all shared plugin memory
-2. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/project_sn_restyle.md` — this plugin's current state, open bugs, design decisions
-3. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/reference_modifyelements_lasso.md` — critical modifyElements rules (sn-restyle relies on this heavily)
-4. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_ask_before_editing.md`
-5. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_no_push_before_testing.md`
-6. `/Users/ctreatherford/.Codex/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_build_snplg_delete_first.md`
+1. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/MEMORY.md` — index of all shared plugin memory
+2. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/project_sn_restyle.md` — this plugin's current state, open bugs, design decisions
+3. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/reference_modifyelements_lasso.md` — critical modifyElements rules (sn-restyle relies on this heavily)
+4. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_ask_before_editing.md`
+5. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_no_push_before_testing.md`
+6. `/Users/ctreatherford/.claude/projects/-Users-ctreatherford-supernote-plugins/memory/feedback_build_snplg_delete_first.md`
 
 Then read whichever reference files in `/Users/ctreatherford/supernote-plugins/references/` are relevant to the task at hand (see the skill file for guidance on which to read when).
 
