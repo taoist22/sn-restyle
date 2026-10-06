@@ -1,6 +1,6 @@
 {
   "name": "Restyle",
-  "version": "0.6.7-beta",
+  "version": "0.7.0-beta",
   "description": "Restyle selected ink or clean a rough drawing into native geometry.",
   "private": true,
   "scripts": {

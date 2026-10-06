@@ -154,7 +154,7 @@ export default function RestylePanel({
   return (
     <View style={styles.root}>
       <View style={styles.card}>
-        <Text allowFontScaling={false} style={styles.title}>Restyle 0.6.7-beta</Text>
+        <Text allowFontScaling={false} style={styles.title}>Restyle 0.7.0-beta</Text>
         <Text allowFontScaling={false} style={styles.subtitle}>{selectionLabel}</Text>
         <View style={styles.tabRow}>
           {([['shape', 'Shape'], ['style', 'Style']] as ['shape' | 'style', string][]).map(([value, label]) => (
