@@ -49,6 +49,14 @@ Use this matrix for the v0.6.0-beta release candidate and future sizing regressi
 
 Geometry fixtures and simulated SDK failure tests cover skipped insertion, durable-backup failure, partial deletion, restoration ordering, edited geometry, stale operations, changed page and UUID recreation. These tests cannot establish real firmware identity, rendering, cache or native undo behavior.
 
+## 0.7.1-beta lasso entry and icon
+
+- On the Main layer, lasso handwriting and confirm **Restyle** appears under **…** with the cursive **R** icon.
+- On a custom layer, lasso a long-press geometry and confirm the cursive **R** icon appears directly on the lasso toolbar; the absence of Restyle inside **…** is expected when it is already visible directly.
+- Repeat both checks in a second note without restarting the device.
+- Confirm the icon remains recognizable at the device's native toolbar size on both Nomad and Manta.
+- Open Restyle from both presentations and apply a harmless color or width change to confirm both entries dispatch to the same panel.
+
 ## 0.6.1-beta stroke-data retry
 
 - Retest the three-stroke arrow that produced “Incomplete stroke data”.

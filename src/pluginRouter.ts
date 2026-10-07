@@ -1,6 +1,6 @@
 import {PluginManager} from 'sn-plugin-lib';
 
-export const BUTTON_ID_LASSO = 200;
+export const BUTTON_ID_LASSO = 7342; // stable and unique across plugins
 
 export type ButtonEvent = {
   pressEvent: number;

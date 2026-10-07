@@ -4,11 +4,11 @@ https://github.com/user-attachments/assets/3e9c37d2-a545-4307-9edc-18d9fa34041b
 
 # Restyle for Supernote
 
-**Restyle** is a plugin for the Supernote Nomad and Manta that lets you change the ink color and stroke thickness of handwriting and geometry shapes you have already written. Lasso any strokes or shapes on the page, tap the Restyle button, pick a color and thickness, and apply — the selected elements are updated in place with no repositioning.
+**Restyle** is a plugin for the Supernote Nomad and Manta that lets you change the ink color and stroke thickness of handwriting and geometry shapes you have already written. Lasso any strokes or shapes on the page, open the Restyle lasso action, pick a color and thickness, and apply — the selected elements are updated in place with no repositioning.
 
 > **Pre-release:** This plugin requires the Supernote beta firmware and is not yet intended for general use.
 
-## Shapes, fills and axes (0.6.x-beta)
+## Shapes, fills and axes
 
 Lasso **one stroke**, open Restyle and use the **Shape** tab. Pick **Auto** or a named shape and tap **Apply**; the stroke is replaced by a clean native shape. **Keep drawing** (the default) does no recognition and leaves ordinary restyling unchanged. Nothing runs in the background while you write.
 
@@ -49,7 +49,9 @@ See [TEST_MATRIX.md](TEST_MATRIX.md) for the on-device checks.
 ## Usage
 
 1. Open a note and lasso the strokes or shapes you want to restyle.
-2. Tap the **Restyle** button in the lasso toolbar.
+2. Open Restyle from the lasso actions:
+   - On the **Main layer**, tap **…**, then tap **Restyle** beside its cursive **R** icon.
+   - On a **custom layer**, the cursive **R** icon may appear directly on the lasso toolbar instead of inside **…**.
 3. The plugin reads your selection and shows the Restyle panel.
 4. *(Optional)* Tap a **preset slot** to instantly load a saved color + thickness.
 5. Tap a color swatch to set the ink color. Choose a familiar native size or use **−** / **+** for 0.1 mm adjustments.
@@ -136,7 +138,7 @@ Shape replacement follows [Charles Cheval’s Snap](https://github.com/CharlesCh
 
 ## Credits
 
-Plugin icon by [Freepik](https://www.flaticon.com/free-icons/document) — Flaticon.
+Restyle uses a custom cursive **R** icon designed for clear identification in the compact lasso toolbar.
 
 ## License
 
